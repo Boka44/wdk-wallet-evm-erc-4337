@@ -18,7 +18,9 @@ import { Contract } from 'ethers'
 
 import { WalletAccountEvm } from '@tetherto/wdk-wallet-evm'
 
-import WalletAccountReadOnlyEvmErc4337 from './wallet-account-read-only-evm-erc-4337.js'
+import WalletAccountReadOnlyEvmErc4337, { FEE_TOLERANCE_COEFFICIENT } from './wallet-account-read-only-evm-erc-4337.js'
+
+/** @typedef {import('./wallet-account-read-only-evm-erc-4337.js').TransactionQuote} TransactionQuote */
 
 /** @typedef {import('@tetherto/wdk-wallet').IWalletAccount} IWalletAccount */
 
@@ -65,8 +67,13 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
     /** @private */
     this._ownerAccount = ownerAccount
 
-    /** @private */
-    this._disposed = false
+    /**
+     * Cached quotes from fee estimations, keyed by serialized transaction.
+     *
+     * @private
+     * @type {Map<string, TransactionQuote>}
+     */
+    this._quoteCache = new Map()
   }
 
   /**
@@ -153,6 +160,46 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
   }
 
   /**
+   * Quotes the costs of a send transaction operation.
+   *
+   * The result is cached internally for up to 2 minutes. If `sendTransaction` is called with the
+   * same transaction within that window, the cached fee is reused without an additional RPC round-trip.
+   *
+   * @param {EvmTransaction | EvmTransaction[]} tx - The transaction, or an array of multiple transactions to send in batch.
+   * @param {Partial<EvmErc4337WalletPaymasterTokenConfig | EvmErc4337WalletSponsorshipPolicyConfig | EvmErc4337WalletNativeCoinsConfig>} [config] - If set, overrides the given configuration options.
+   * @returns {Promise<Omit<TransactionResult, 'hash'>>} The transaction's quotes.
+   */
+  async quoteSendTransaction (tx, config) {
+    const mergedConfig = { ...this._config, ...config }
+
+    if (config) {
+      this._validateConfig(mergedConfig)
+    }
+
+    const txKey = WalletAccountReadOnlyEvmErc4337._getTxKey(tx)
+
+    if (mergedConfig.isSponsored) {
+      this._quoteCache.set(txKey, { fee: 0n, createdAt: Date.now(), txKey })
+      return { fee: 0n }
+    }
+
+    const gasCostResult = await this._getUserOperationGasCost([tx].flat(), mergedConfig)
+
+    const fee = BigInt(gasCostResult.fee) * FEE_TOLERANCE_COEFFICIENT / 100n
+
+    this._quoteCache.set(txKey, {
+      fee,
+      createdAt: Date.now(),
+      txKey,
+      userOp: gasCostResult.userOp,
+      smartAccount: gasCostResult.smartAccount,
+      chainId: gasCostResult.chainId
+    })
+
+    return { fee }
+  }
+
+  /**
    * Sends a transaction.
    *
    * @param {EvmTransaction | EvmTransaction[]} tx -  The transaction, or an array of multiple transactions to send in batch.
@@ -172,9 +219,11 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
       cached = this._consumeCachedQuote(tx)
     }
 
-    const fee = cached?.fee ?? 0n
+    const fee = cached.fee
 
-    const hash = await this._sendUserOperation([tx].flat(), mergedConfig, cached)
+    const hash = await this._sendUserOperation([tx].flat(), { config: mergedConfig, cachedBuild: cached })
+
+    this._quoteCache.clear()
 
     return { hash, fee }
   }
@@ -203,13 +252,15 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
       cached = this._consumeCachedQuote(tx)
     }
 
-    const fee = cached?.fee ?? 0n
+    const fee = cached.fee
 
     if (!isSponsored && transferMaxFee !== undefined && fee >= transferMaxFee) {
       throw new Error('Exceeded maximum fee cost for transfer operation.')
     }
 
-    const hash = await this._sendUserOperation([tx], mergedConfig, cached)
+    const hash = await this._sendUserOperation([tx], { config: mergedConfig, cachedBuild: cached })
+
+    this._quoteCache.clear()
 
     return { hash, fee }
   }
@@ -232,41 +283,32 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
    */
   dispose () {
     this._ownerAccount.dispose()
-    this._disposed = true
   }
 
   /** @private */
   _consumeCachedQuote (tx) {
-    const quote = this._lastQuote
+    const txKey = WalletAccountReadOnlyEvmErc4337._getTxKey(tx)
+    const quote = this._quoteCache.get(txKey)
 
     if (!quote) {
       return undefined
     }
 
+    this._quoteCache.delete(txKey)
+
     if (Date.now() - quote.createdAt > QUOTE_MAX_AGE_MS) {
-      this._lastQuote = undefined
       return undefined
     }
-
-    if (WalletAccountReadOnlyEvmErc4337._getTxKey(tx) !== quote.txKey) {
-      return undefined
-    }
-
-    this._lastQuote = undefined
 
     return quote
   }
 
   /** @private */
-  async _sendUserOperation (txs, config, cachedBuild) {
-    if (this._disposed) {
-      throw new Error('Private key has been disposed.')
-    }
-
+  async _sendUserOperation (txs, { config, cachedBuild }) {
     try {
       const { userOp, smartAccount, chainId } = cachedBuild?.userOp
         ? cachedBuild
-        : await this._buildUserOperation(WalletAccountReadOnlyEvmErc4337._toCalls(txs), config)
+        : await this._buildUserOperation(WalletAccountReadOnlyEvmErc4337._toMetaTransactions(txs), config)
 
       const signer = {
         address: this._ownerAccountAddress,

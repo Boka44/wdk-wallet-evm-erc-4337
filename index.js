@@ -36,7 +36,7 @@
 /** @typedef {import('./src/wallet-account-read-only-evm-erc-4337.js').EvmErc4337WalletPaymasterTokenConfig} EvmErc4337WalletPaymasterTokenConfig */
 /** @typedef {import('./src/wallet-account-read-only-evm-erc-4337.js').EvmErc4337WalletSponsorshipPolicyConfig} EvmErc4337WalletSponsorshipPolicyConfig */
 /** @typedef {import('./src/wallet-account-read-only-evm-erc-4337.js').EvmErc4337WalletNativeCoinsConfig} EvmErc4337WalletNativeCoinsConfig */
-/** @typedef {import('./src/wallet-account-read-only-evm-erc-4337.js').OnchainIdentifier} OnchainIdentifier */
+/** @typedef {import('./src/wallet-account-read-only-evm-erc-4337.js').OnChainIdentifier} OnChainIdentifier */
 
 export { default } from './src/wallet-manager-evm-erc-4337.js'
 

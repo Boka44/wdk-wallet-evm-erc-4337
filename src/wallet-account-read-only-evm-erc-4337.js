@@ -21,21 +21,25 @@ import { WalletAccountReadOnlyEvm } from '@tetherto/wdk-wallet-evm'
 import {
   // eslint-disable-next-line camelcase
   SafeAccountV0_3_0 as SafeAccount030,
+  AbstractionKitError,
   Bundler,
   Erc7677Paymaster,
   ENTRYPOINT_V7,
   calculateUserOperationMaxGasCost
 } from 'abstractionkit'
 
+/** @typedef {import('abstractionkit').InitCodeOverrides} InitCodeOverrides */
+/** @typedef {import('abstractionkit').MetaTransaction} MetaTransaction */
+
 import { ConfigurationError } from './errors.js'
 
-const PaymasterMode = Object.freeze({
+const PaymasterMode = {
   NATIVE: 'native',
   SPONSORED: 'sponsored',
   TOKEN: 'token'
-})
+}
 
-const FEE_TOLERANCE_COEFFICIENT = 120n
+export const FEE_TOLERANCE_COEFFICIENT = 120n
 
 /** @typedef {import('ethers').Eip1193Provider} Eip1193Provider */
 
@@ -48,34 +52,25 @@ const FEE_TOLERANCE_COEFFICIENT = 120n
 
 /** @typedef {import('@tetherto/wdk-wallet-evm').TypedData} TypedData */
 
-/**
- * @typedef {Object} UserOperationReceipt
- * @property {string} userOpHash - The hash of the user operation.
- * @property {string} sender - The sender (smart account) address.
- * @property {string} nonce - The nonce used by the user operation.
- * @property {string} [paymaster] - The paymaster address, if one was used.
- * @property {bigint} actualGasCost - The actual gas cost charged (in wei).
- * @property {bigint} actualGasUsed - The actual gas units consumed.
- * @property {boolean} success - Whether the inner account execution succeeded.
- * @property {Object} receipt - The underlying transaction receipt.
- * @property {string[]} [logs] - Encoded logs emitted during execution.
- */
+/** @typedef {import('abstractionkit').UserOperationReceiptResult} UserOperationReceipt */
+/** @typedef {import('abstractionkit').UserOperationV7} UserOperationV7 */
 
 /**
- * @typedef {Object} CachedQuote
+ * @typedef {Object} TransactionQuote
  * @property {bigint} fee - The estimated fee with tolerance buffer applied.
  * @property {number} createdAt - The timestamp when the quote was created.
  * @property {string} txKey - A serialized key of the transaction used for cache matching.
- * @property {Object} [userOp] - The built UserOperation, reusable by sendTransaction.
- * @property {Object} [smartAccount] - The smart account instance used to build the UserOperation.
+ * @property {UserOperationV7} [userOp] - The built UserOperation, reusable by sendTransaction.
+ * @property {SafeAccountV0_3_0} [smartAccount] - The smart account instance used to build the UserOperation.
+ * @property {bigint} [chainId] - The chain id.
  */
 
 /**
- * @typedef {Object} OnchainIdentifier
+ * @typedef {Object} OnChainIdentifier
  * @property {string} project - The project name included in the 50-byte on-chain marker.
- * @property {'Web' | 'Mobile' | 'Safe App' | 'Widget'} [platform]
- * @property {string} [tool]
- * @property {string} [toolVersion]
+ * @property {'Web' | 'Mobile' | 'Safe App' | 'Widget'} [platform] - The platform type (default: 'Web').
+ * @property {string} [tool] - The tool name used to create the UserOperation.
+ * @property {string} [toolVersion] - The version of the tool.
  */
 
 /**
@@ -83,9 +78,8 @@ const FEE_TOLERANCE_COEFFICIENT = 120n
  * @property {number} chainId - The blockchain's id (e.g., 1 for ethereum).
  * @property {string | Eip1193Provider} provider - The url of the rpc provider, or an instance of a class that implements eip-1193.
  * @property {string} bundlerUrl - The url of the bundler service.
- * @property {string} entryPointAddress - The address of the entry point smart contract.
  * @property {string} safeModulesVersion - The safe modules version.
- * @property {OnchainIdentifier | string} [onchainIdentifier] - Optional AbstractionKit on-chain identifier. Appends a 50-byte project marker to every UserOperation callData. Pass a string to reuse it as the project name, or a full object for more control.
+ * @property {OnChainIdentifier | string} [onChainIdentifier] - Optional on-chain identifier. Appends a 50-byte project marker to every UserOperation callData. Pass a string to reuse it as the project name, or a full object for more control.
  */
 
 /**
@@ -135,11 +129,8 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
    * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee'>} config - The configuration object.
    */
   constructor (address, config) {
-    if (config.entryPointAddress && config.entryPointAddress.toLowerCase() !== ENTRYPOINT_V7.toLowerCase()) {
-      throw new ConfigurationError(
-        `Unsupported EntryPoint address: ${config.entryPointAddress}. ` +
-        `SafeAccountV0_3_0 only supports EntryPoint v0.7 (${ENTRYPOINT_V7}).`
-      )
+    if (!SAFE_MODULES_MAP[config.safeModulesVersion]) {
+      throw new ConfigurationError(`Unsupported safe modules version: ${config.safeModulesVersion}`)
     }
 
     const safeAddress = WalletAccountReadOnlyEvmErc4337.predictSafeAddress(address, config)
@@ -163,14 +154,6 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
     this._bundler = undefined
 
     /**
-     * Cached quote from the last fee estimation.
-     *
-     * @protected
-     * @type {CachedQuote | undefined}
-     */
-    this._lastQuote = undefined
-
-    /**
      * The chain id.
      *
      * @protected
@@ -182,7 +165,7 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
      * Cached Erc7677Paymaster instances keyed by URL.
      *
      * @protected
-     * @type {Map<string, Object>}
+     * @type {Map<string, Erc7677Paymaster>}
      */
     this._paymasters = new Map()
 
@@ -191,11 +174,10 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
   }
 
   /**
-   * Predicts the address of a safe account. Delegates to AbstractionKit's
-   * offline CREATE2 derivation (no RPC calls).
+   * Predicts the address of a safe account.
    *
    * @param {string} owner - The safe owner's address.
-   * @param {Pick<EvmErc4337WalletConfig, 'safeModulesVersion' | 'onchainIdentifier' | 'entryPointAddress'>} config - The safe configuration.
+   * @param {Pick<EvmErc4337WalletConfig, 'safeModulesVersion' | 'onChainIdentifier'>} config - The safe configuration.
    * @returns {string} The Safe address.
    */
   static predictSafeAddress (owner, config) {
@@ -280,15 +262,6 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
 
     const fee = BigInt(gasCostResult.fee) * FEE_TOLERANCE_COEFFICIENT / 100n
 
-    this._lastQuote = {
-      fee,
-      createdAt: Date.now(),
-      txKey: WalletAccountReadOnlyEvmErc4337._getTxKey(tx),
-      userOp: gasCostResult.userOp,
-      smartAccount: gasCostResult.smartAccount,
-      chainId: gasCostResult.chainId
-    }
-
     return { fee }
   }
 
@@ -320,14 +293,10 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
     const bundler = this._getBundler()
     const evmReadOnlyAccount = await this._getEvmReadOnlyAccount()
 
-    try {
-      const result = await bundler.getUserOperationByHash(hash)
-      if (!result || !result.transactionHash) return null
+    const result = await bundler.getUserOperationByHash(hash)
+    if (!result || !result.transactionHash) return null
 
-      return await evmReadOnlyAccount.getTransactionReceipt(result.transactionHash)
-    } catch {
-      return null
-    }
+    return await evmReadOnlyAccount.getTransactionReceipt(result.transactionHash)
   }
 
   /**
@@ -339,11 +308,7 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
   async getUserOperationReceipt (hash) {
     const bundler = this._getBundler()
 
-    try {
-      return await bundler.getUserOperationReceipt(hash)
-    } catch {
-      return null
-    }
+    return await bundler.getUserOperationReceipt(hash)
   }
 
   /**
@@ -426,23 +391,22 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
   }
 
   /**
-   * Builds an AbstractionKit SafeAccountV0_3_0 instance for the current owner.
-   * Omits factoryAddress/factoryData when the account is already deployed, so
-   * subsequent UserOperations don't try to redeploy it (which would revert at
-   * the EntryPoint).
+   * Builds a safe account instance for the current owner.
    *
    * @protected
-   * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee'>} [config]
-   * @returns {Promise<object>} The AbstractionKit SafeAccountV0_3_0 instance.
+   * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee'>} [config] - The wallet configuration. Defaults to the instance configuration.
+   * @returns {Promise<SafeAccountV0_3_0>} The safe account instance.
    */
   async _getSmartAccount (config = this._config) {
+    if (this._deployedSmartAccount) return this._deployedSmartAccount
+
     const overrides = WalletAccountReadOnlyEvmErc4337._getInitCodeOverrides(config)
     const safeAddress = await this.getAddress()
     const providerRpc = WalletAccountReadOnlyEvmErc4337._resolveProviderRpc(config.provider)
 
-    if (this._deployed || await SafeAccount030.isDeployed(safeAddress, providerRpc)) {
-      this._deployed = true
-      return new SafeAccount030(safeAddress, overrides)
+    if (await SafeAccount030.isDeployed(safeAddress, providerRpc)) {
+      this._deployedSmartAccount = new SafeAccount030(safeAddress, overrides)
+      return this._deployedSmartAccount
     }
 
     return SafeAccount030.initializeNewAccount([this._ownerAccountAddress], overrides)
@@ -514,9 +478,9 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
    *
    * @protected
    * @param {EvmTransaction[]} txs - The transactions to convert.
-   * @returns {Object[]} The calls array for createUserOperation.
+   * @returns {MetaTransaction[]} The calls array for createUserOperation.
    */
-  static _toCalls (txs) {
+  static _toMetaTransactions (txs) {
     return txs.map(tx => ({
       to: tx.to,
       value: tx.value !== undefined ? BigInt(tx.value) : 0n,
@@ -525,53 +489,39 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
   }
 
   /**
-   * Builds AbstractionKit InitCodeOverrides from the wallet configuration.
+   * Builds the init code overrides from the wallet configuration.
    *
    * @protected
-   * @param {Partial<EvmErc4337WalletConfig>} config
-   * @returns {object}
+   * @param {Pick<EvmErc4337WalletConfig, 'safeModulesVersion' | 'onChainIdentifier'>} config - The wallet configuration fields used for init code generation.
+   * @returns {InitCodeOverrides} The init code overrides for SafeAccount creation.
    */
   static _getInitCodeOverrides (config) {
-    const { safeModulesVersion, entryPointAddress, onchainIdentifier } = config
+    const { safeModulesVersion, onChainIdentifier } = config
     const modules = SAFE_MODULES_MAP[safeModulesVersion]
-    if (!modules) {
-      throw new Error(`Unsupported safe modules version: ${safeModulesVersion}`)
-    }
 
     const overrides = {
       c2Nonce: BigInt(SALT_NONCE),
+      entrypointAddress: ENTRYPOINT_V7,
       safe4337ModuleAddress: modules.safe4337ModuleAddress,
       safeModuleSetupAddress: modules.safeModuleSetupAddress
     }
 
-    if (entryPointAddress) {
-      overrides.entrypointAddress = entryPointAddress
-    }
-
-    if (onchainIdentifier) {
-      overrides.onChainIdentifierParams = typeof onchainIdentifier === 'string'
-        ? { project: onchainIdentifier }
-        : onchainIdentifier
+    if (onChainIdentifier) {
+      overrides.onChainIdentifierParams = typeof onChainIdentifier === 'string'
+        ? { project: onChainIdentifier }
+        : onChainIdentifier
     }
 
     return overrides
   }
 
   /**
-   * Builds a UserOperation via AbstractionKit with paymaster fields applied.
-   * Shared by gas quoting (read-only) and sending (full-access).
-   *
-   * - Native: full AK estimation via the bundler.
-   * - Candide paymaster: full AK estimation first (their bundler requires
-   *   gas headroom from double-estimation), then Erc7677Paymaster.
-   * - Pimlico / other ERC-7677: skip initial estimation (bundlers reject
-   *   prefund check without paymaster), let Erc7677Paymaster drive
-   *   estimation with paymaster attached.
+   * Builds a UserOperation with paymaster fields applied.
    *
    * @protected
-   * @param {object[]} calls
-   * @param {object} config
-   * @returns {Promise<object>} The fully-populated UserOperation ready to sign.
+   * @param {MetaTransaction[]} calls - The meta-transactions to include in the UserOperation.
+   * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee'>} config - The wallet configuration.
+   * @returns {Promise<{userOp: UserOperationV7, smartAccount: SafeAccountV0_3_0, mode: string, chainId: bigint, tokenQuote?: import('abstractionkit').TokenQuote}>} The fully-populated UserOperation ready to sign.
    */
   async _buildUserOperation (calls, config) {
     const smartAccount = await this._getSmartAccount(config)
@@ -617,9 +567,9 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
     return { userOp, smartAccount, mode, chainId, tokenQuote }
   }
 
-  /** @private */
+  /** @protected */
   async _getUserOperationGasCost (txs, config) {
-    const calls = WalletAccountReadOnlyEvmErc4337._toCalls(txs)
+    const calls = WalletAccountReadOnlyEvmErc4337._toMetaTransactions(txs)
 
     try {
       const buildResult = await this._buildUserOperation(calls, config)
@@ -630,8 +580,7 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
 
       return { fee, ...buildResult }
     } catch (error) {
-      const msg = [error.message, error.cause?.message].join(' ')
-      if (msg.includes('AA50') || msg.includes('token balance')) {
+      if (error instanceof AbstractionKitError && error.message.includes('AA50')) {
         throw new Error(
           'Token paymaster requires the account to hold the paymaster token for fee estimation. ' +
           'Fund the account with the paymaster token before quoting.'
@@ -652,7 +601,7 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
   static _resolveProviderRpc (provider) {
     if (typeof provider === 'string') return provider
     if (Array.isArray(provider)) return provider.find(p => typeof p === 'string')
-    return undefined
+    throw new ConfigurationError('The provider must be a string URL or an array containing a string URL.')
   }
 
   /** @private */
@@ -671,26 +620,27 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
 
   /** @private */
   static _detectProvider (url) {
-    return Erc7677Paymaster.detectProvider(url) ||
-      (url?.includes('pimlico') ? 'pimlico' : url?.includes('candide') ? 'candide' : null)
+    const detected = Erc7677Paymaster.detectProvider(url)
+    if (detected) return detected
+    if (url?.includes('pimlico')) return 'pimlico'
+    if (url?.includes('candide')) return 'candide'
+    return null
   }
 
   /** @private */
   async _applyPaymasterToUserOp ({ mode, smartAccount, userOp, config, chainId }) {
-    if (mode === PaymasterMode.NATIVE) return { userOp }
-
     const erc7677 = this._getPaymaster(config.paymasterUrl, { chainId: BigInt(chainId) })
 
     const context = mode === PaymasterMode.TOKEN
       ? { token: config.paymasterToken.address }
-      : (config.sponsorshipPolicyId ? { sponsorshipPolicyId: config.sponsorshipPolicyId } : {})
+      : { sponsorshipPolicyId: config.sponsorshipPolicyId }
 
     const result = await erc7677.createPaymasterUserOperation(
       smartAccount,
       userOp,
       config.bundlerUrl,
       context,
-      { entrypoint: config.entryPointAddress }
+      { entrypoint: ENTRYPOINT_V7 }
     )
 
     return { userOp: result.userOperation, tokenQuote: result.tokenQuote }
