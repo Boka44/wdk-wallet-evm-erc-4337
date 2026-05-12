@@ -476,17 +476,6 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
   }
 
   /**
-   * Returns a serialized key for transaction cache matching.
-   *
-   * @protected
-   * @param {EvmTransaction | EvmTransaction[]} tx - The transaction(s) to serialize.
-   * @returns {string} The serialized transaction key.
-   */
-  static _getTxKey (tx) {
-    return JSON.stringify([tx].flat(), (_, v) => typeof v === 'bigint' ? v.toString() : v)
-  }
-
-  /**
    * Converts EVM transactions to AbstractionKit MetaTransaction calls.
    *
    * @protected
@@ -546,37 +535,19 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
       ? WalletAccountReadOnlyEvmErc4337._detectProvider(config.paymasterUrl)
       : null
 
-    if (mode === PaymasterMode.NATIVE || provider === 'candide') {
-      const gasPrice = await this._fetchBundlerGasPrice(config.bundlerUrl)
-      const baseUserOp = await smartAccount.createUserOperation(
-        calls,
-        providerRpc,
-        config.bundlerUrl,
-        gasPrice
-      )
-
-      if (mode === PaymasterMode.NATIVE) {
-        return { userOp: baseUserOp, smartAccount, mode, chainId }
-      }
-
-      const { userOp, tokenQuote } = await this._applyPaymasterToUserOp({
-        mode, smartAccount, userOp: baseUserOp, config, chainId
-      })
-      return { userOp, smartAccount, mode, chainId, tokenQuote }
-    }
-
     const gasPrice = await this._fetchBundlerGasPrice(config.bundlerUrl)
-    const baseUserOp = await smartAccount.createUserOperation(
-      calls,
-      providerRpc,
-      undefined,
-      { skipGasEstimation: true, ...gasPrice }
-    )
+
+    const baseUserOp = (mode === PaymasterMode.NATIVE || provider === 'candide')
+      ? await smartAccount.createUserOperation(calls, providerRpc, config.bundlerUrl, gasPrice)
+      : await smartAccount.createUserOperation(calls, providerRpc, undefined, { skipGasEstimation: true, ...gasPrice })
+
+    if (mode === PaymasterMode.NATIVE) {
+      return { userOp: baseUserOp, smartAccount, mode, chainId }
+    }
 
     const { userOp, tokenQuote } = await this._applyPaymasterToUserOp({
       mode, smartAccount, userOp: baseUserOp, config, chainId
     })
-
     return { userOp, smartAccount, mode, chainId, tokenQuote }
   }
 
@@ -589,7 +560,7 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
    * @protected
    * @param {EvmTransaction[]} txs - The EVM transactions to include in the UserOperation.
    * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee'>} config - The wallet configuration to use for the build.
-   * @returns {Promise<BuiltUserOperation & { fee: bigint }>} The built operation plus its raw fee (no tolerance buffer applied).
+   * @returns {Promise<BuiltUserOperation & Omit<TransactionResult, 'hash'>>} The built operation plus its raw fee (no tolerance buffer applied).
    * @throws {Error} If the token paymaster reports AA50 (account does not hold the paymaster token).
    */
   async _getUserOperationGasCost (txs, config) {

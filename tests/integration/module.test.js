@@ -560,7 +560,7 @@ describe('@wdk/wallet-evm-erc-4337', () => {
 
     const { hash, fee: transferFee } = await account0.transfer(TRANSFER)
     await waitForTx(hash, account0)
-    expect(quoteSpy).toHaveBeenCalledTimes(3)
+    expect(quoteSpy).toHaveBeenCalledTimes(2)
 
     expect(transferFee).toBe(quotedFee)
 

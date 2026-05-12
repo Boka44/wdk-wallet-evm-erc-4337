@@ -18,14 +18,14 @@ import { Contract } from 'ethers'
 
 import { WalletAccountEvm } from '@tetherto/wdk-wallet-evm'
 
+import { AbstractionKitError } from 'abstractionkit'
+
 import WalletAccountReadOnlyEvmErc4337, { FEE_TOLERANCE_COEFFICIENT } from './wallet-account-read-only-evm-erc-4337.js'
 
 /** @typedef {import('abstractionkit').UserOperationV7} UserOperationV7 */
 /** @typedef {import('abstractionkit').SafeAccountV0_3_0} SafeAccountV0_3_0 */
 
 /**
- * Internal cache shape for `_quoteCache`. Not part of the public API.
- *
  * @internal
  * @typedef {Object} TransactionQuote
  * @property {bigint} fee - The estimated fee with tolerance buffer applied.
@@ -190,7 +190,7 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
       this._validateConfig(mergedConfig)
     }
 
-    const txKey = WalletAccountReadOnlyEvmErc4337._getTxKey(tx)
+    const txKey = WalletAccountEvmErc4337._getTxKey(tx)
 
     if (mergedConfig.isSponsored) {
       this._quoteCache.set(txKey, { fee: 0n, createdAt: Date.now(), txKey })
@@ -237,7 +237,7 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
 
     const hash = await this._sendUserOperation([tx].flat(), { config: mergedConfig, cachedBuild: cached })
 
-    this._quoteCache.clear()
+    this._invalidateCachedUserOps()
 
     return { hash, fee }
   }
@@ -274,7 +274,7 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
 
     const hash = await this._sendUserOperation([tx], { config: mergedConfig, cachedBuild: cached })
 
-    this._quoteCache.clear()
+    this._invalidateCachedUserOps()
 
     return { hash, fee }
   }
@@ -300,8 +300,22 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
   }
 
   /** @private */
+  _invalidateCachedUserOps () {
+    for (const quote of this._quoteCache.values()) {
+      quote.userOp = undefined
+      quote.smartAccount = undefined
+      quote.chainId = undefined
+    }
+  }
+
+  /** @private */
+  static _getTxKey (tx) {
+    return JSON.stringify([tx].flat(), (_, v) => typeof v === 'bigint' ? v.toString() : v)
+  }
+
+  /** @private */
   _consumeCachedQuote (tx) {
-    const txKey = WalletAccountReadOnlyEvmErc4337._getTxKey(tx)
+    const txKey = WalletAccountEvmErc4337._getTxKey(tx)
     const quote = this._quoteCache.get(txKey)
 
     if (!quote) {
@@ -336,7 +350,7 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
 
       return await this._getBundler().sendUserOperation(userOp, smartAccount.entrypointAddress)
     } catch (err) {
-      if (err.message?.includes('AA50')) {
+      if (err instanceof AbstractionKitError && err.message.includes('AA50')) {
         throw new Error('Not enough funds on the safe account to repay the paymaster.')
       }
       throw err

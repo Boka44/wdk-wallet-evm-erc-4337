@@ -10,14 +10,6 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
      */
     static predictSafeAddress(owner: string, config: Pick<EvmErc4337WalletConfig, "safeModulesVersion" | "onChainIdentifier">): string;
     /**
-     * Returns a serialized key for transaction cache matching.
-     *
-     * @protected
-     * @param {EvmTransaction | EvmTransaction[]} tx - The transaction(s) to serialize.
-     * @returns {string} The serialized transaction key.
-     */
-    protected static _getTxKey(tx: EvmTransaction | EvmTransaction[]): string;
-    /**
      * Builds the init code overrides from the wallet configuration.
      *
      * @protected
@@ -201,7 +193,7 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
      * @returns {Promise<BuiltUserOperation & { fee: bigint }>} The built operation plus its raw fee (no tolerance buffer applied).
      * @throws {Error} If the token paymaster reports AA50 (account does not hold the paymaster token).
      */
-    protected _getUserOperationGasCost(txs: EvmTransaction[], config: Omit<EvmErc4337WalletConfig, "transferMaxFee">): Promise<BuiltUserOperation & { fee: bigint }>;
+    protected _getUserOperationGasCost(txs: EvmTransaction[], config: Omit<EvmErc4337WalletConfig, "transferMaxFee">): Promise<BuiltUserOperation & Omit<TransactionResult, "hash">>;
 }
 export type Eip1193Provider = import("ethers").Eip1193Provider;
 export type EvmTransaction = import("@tetherto/wdk-wallet-evm").EvmTransaction;

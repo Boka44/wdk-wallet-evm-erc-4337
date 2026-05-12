@@ -97,6 +97,8 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
      */
     dispose(): void;
     /** @private */
+    private static _getTxKey;
+    /** @private */
     private _consumeCachedQuote;
     /** @private */
     private _sendUserOperation;
