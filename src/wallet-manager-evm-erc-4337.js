@@ -74,10 +74,9 @@ export default class WalletManagerEvmErc4337 extends WalletManager {
 
       this._provider = failoverProvider.initialize()
     } else {
-      this._provider =
-        typeof provider === 'string'
-          ? new JsonRpcProvider(provider)
-          : new BrowserProvider(provider)
+      this._provider = typeof provider === 'string'
+        ? new JsonRpcProvider(provider)
+        : new BrowserProvider(provider)
     }
   }
 
