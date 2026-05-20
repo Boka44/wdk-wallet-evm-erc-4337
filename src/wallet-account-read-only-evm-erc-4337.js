@@ -14,6 +14,8 @@
 
 'use strict'
 
+import { JsonRpcProvider } from 'ethers'
+
 import { WalletAccountReadOnly } from '@tetherto/wdk-wallet'
 
 import { WalletAccountReadOnlyEvm } from '@tetherto/wdk-wallet-evm'
@@ -31,6 +33,8 @@ import {
 /** @typedef {import('abstractionkit').InitCodeOverrides} InitCodeOverrides */
 /** @typedef {import('abstractionkit').MetaTransaction} MetaTransaction */
 /** @typedef {import('abstractionkit').SafeAccountV0_3_0} SafeAccountV0_3_0 */
+
+import FailoverProvider from '@tetherto/wdk-failover-provider'
 
 import { ConfigurationError } from './errors.js'
 
@@ -77,7 +81,8 @@ export const FEE_TOLERANCE_COEFFICIENT = 120n
 /**
  * @typedef {Object} EvmErc4337WalletCommonConfig
  * @property {number} chainId - The blockchain's id (e.g., 1 for ethereum).
- * @property {string | Eip1193Provider | (string | Eip1193Provider)[]} provider - RPC provider: a URL string, an EIP-1193 provider object, or an array of either. When an array is supplied, the first Eip1193Provider is preferred; a URL string is used as a fallback.
+ * @property {string | Eip1193Provider | Array<string | Eip1193Provider>} provider - The url of the rpc provider, or an instance of a class that implements eip-1193. It's also possible to provide an array of urls or EIP 1193 providers instead. In such case, connection errors will cause the wallet to automatically fallback on the next provider in the list.
+ * @property {number} [retries] - If set and if 'provider' is a list of urls or EIP 1193 providers, the number of additional retry attempts after the initial call fails. Total attempts = `1 + retries`. For example, `retries: 3` with 4 providers will try each provider once before throwing. If `retries` exceeds the number of providers, the failover will loop back and retry already-failed providers in round-robin order. Default: 3.
  * @property {string} bundlerUrl - The url of the bundler service.
  * @property {string} safeModulesVersion - Version of the Safe 4337 module set to deploy with the account (e.g. "0.3.0"). Determines the module addresses used in init code.
  * @property {OnChainIdentifier | string} [onChainIdentifier] - Optional on-chain identifier. Appends a 50-byte project marker to every UserOperation callData. Pass a string to reuse it as the project name, or a full object for more control.
@@ -173,6 +178,19 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
 
     /** @private */
     this._ownerAccountAddress = address
+
+    /**
+     * An EIP-1193–compatible provider used to interact with the blockchain.
+     *
+     * Note: the provider type is restricted to EIP-1193 to ensure compatibility
+     * with Safe4337Pack and to enable the failover mechanism. While RPC URLs
+     * can still be provided in the configuration, they are internally wrapped
+     * into an EIP-1193 provider.
+     *
+     * @protected
+     * @type {Eip1193Provider}
+     */
+    this._provider = this._createFailoverProvider(this._config)
 
     /** @private */
     this._deployedSmartAccount = undefined
@@ -415,9 +433,8 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
 
     const overrides = WalletAccountReadOnlyEvmErc4337._getInitCodeOverrides(config)
     const safeAddress = await this.getAddress()
-    const providerRpc = WalletAccountReadOnlyEvmErc4337._resolveProviderRpc(config.provider)
 
-    if (await SafeAccount030.isDeployed(safeAddress, providerRpc)) {
+    if (await SafeAccount030.isDeployed(safeAddress, this._provider)) {
       this._deployedSmartAccount = new SafeAccount030(safeAddress, overrides)
       return this._deployedSmartAccount
     }
@@ -455,14 +472,59 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
    */
   async _getChainId () {
     if (!this._chainId) {
-      const evmReadOnlyAccount = await this._getEvmReadOnlyAccount()
+      const chainId = await this._provider.request({ method: 'eth_chainId' })
 
-      const { chainId } = await evmReadOnlyAccount._provider.getNetwork()
-
-      this._chainId = chainId
+      this._chainId = BigInt(chainId)
     }
 
     return this._chainId
+  }
+
+  /**
+   * Wraps a string RPC URL or provider into an EIP-1193 compatible provider.
+   *
+   * @protected
+   * @param {string | Eip1193Provider} provider - The url of the rpc provider, or an instance of a class that implements eip-1193.
+   * @returns { Eip1193Provider } A wrapped Eip1193Provider instance.
+   */
+  _wrapEip1193Provider (provider) {
+    return typeof provider === 'string'
+      ? {
+          provider: new JsonRpcProvider(provider),
+          request ({ method, params }) {
+            return this.provider.send(method, params ?? [])
+          }
+        }
+      : provider
+  }
+
+  /**
+   * Creates a FailoverProvider from the configured providers. If only one provider is supplied, it is wrapped and returned.
+   *
+   * @protected
+   * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee'>} [config] - The configuration object.
+   * @returns {Eip1193Provider} A wrapped Eip1193Provider instance.
+   * @throws {Error} If the `provider` option is set to an empty array.
+   */
+  _createFailoverProvider (config = this._config) {
+    const { provider, retries = 3 } = config
+
+    if (Array.isArray(provider)) {
+      if (!provider.length) {
+        throw new Error("The 'provider' option cannot be set to an empty list.")
+      }
+
+      const failoverProvider = new FailoverProvider({ retries })
+
+      for (const entry of provider) {
+        const option = this._wrapEip1193Provider(entry)
+        failoverProvider.addProvider(option)
+      }
+
+      return failoverProvider.initialize()
+    }
+
+    return this._wrapEip1193Provider(provider)
   }
 
   /** @private */
@@ -530,7 +592,6 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
     const chainId = await this._getChainId()
 
     const mode = WalletAccountReadOnlyEvmErc4337._resolvePaymasterMode(config)
-    const providerRpc = WalletAccountReadOnlyEvmErc4337._resolveProviderRpc(config.provider)
     const provider = mode !== PaymasterMode.NATIVE
       ? WalletAccountReadOnlyEvmErc4337._detectProvider(config.paymasterUrl)
       : null
@@ -538,8 +599,8 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
     const gasPrice = await this._fetchBundlerGasPrice(config.bundlerUrl)
 
     const baseUserOp = (mode === PaymasterMode.NATIVE || provider === 'candide')
-      ? await smartAccount.createUserOperation(calls, providerRpc, config.bundlerUrl, gasPrice)
-      : await smartAccount.createUserOperation(calls, providerRpc, undefined, { skipGasEstimation: true, ...gasPrice })
+      ? await smartAccount.createUserOperation(calls, this._provider, config.bundlerUrl, gasPrice)
+      : await smartAccount.createUserOperation(calls, this._provider, undefined, { skipGasEstimation: true, ...gasPrice })
 
     if (mode === PaymasterMode.NATIVE) {
       return { userOp: baseUserOp, smartAccount, mode, chainId }
@@ -590,17 +651,6 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
     if (config.useNativeCoins) return PaymasterMode.NATIVE
     if (config.isSponsored) return PaymasterMode.SPONSORED
     return PaymasterMode.TOKEN
-  }
-
-  /** @private */
-  static _resolveProviderRpc (provider) {
-    if (typeof provider === 'string') return provider
-    if (Array.isArray(provider)) {
-      const resolved = provider.find(p => typeof p !== 'string') ?? provider.find(p => typeof p === 'string')
-      if (!resolved) throw new ConfigurationError('The provider array must contain at least one string URL or Eip1193Provider.')
-      return resolved
-    }
-    return provider
   }
 
   /** @private */

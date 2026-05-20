@@ -554,7 +554,7 @@ describe('@wdk/wallet-evm-erc-4337', () => {
       expect(fee).toBe(estimatedFee)
     }, TIMEOUT)
 
-    test('should accept an array provider and prefer the Eip1193Provider', async () => {
+    test('should accept an array provider of multiple formats', async () => {
       const eip1193Provider = {
         request ({ method, params }) {
           return ethersProvider.send(method, params ?? [])
