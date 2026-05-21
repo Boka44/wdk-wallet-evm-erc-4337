@@ -301,22 +301,16 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
 
   /** @private */
   async _bumpCachedNonces () {
-    const quotesWithUserOp = [...this._quoteCache.values()].filter(q => q.userOp)
+    const quotesWithUserOp = [...this._quoteCache.values()].filter(({ userOp }) => userOp)
 
     if (quotesWithUserOp.length === 0) return
-
-    const preBumpNonce = quotesWithUserOp[0].userOp.nonce
-
-    for (const quote of quotesWithUserOp) {
-      quote.userOp.nonce += 1n
-    }
 
     const { smartAccount } = quotesWithUserOp[0]
     const providerRpc = WalletAccountReadOnlyEvmErc4337._resolveProviderRpc(this._config.provider)
     const onChainNonce = await smartAccount.getNonce(providerRpc)
 
-    if (onChainNonce > preBumpNonce + 1n) {
-      this._quoteCache.clear()
+    for (const quote of quotesWithUserOp) {
+      quote.userOp.nonce = onChainNonce + 1n
     }
   }
 
