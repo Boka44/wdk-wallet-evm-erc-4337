@@ -1,5 +1,5 @@
 import { describe, expect, test, beforeAll, beforeEach, afterAll, jest } from '@jest/globals'
-import WalletManagerEvmErc4337 from '../../index.js'
+import WalletManagerEvmErc4337, { WalletAccountReadOnlyEvmErc4337 } from '../../index.js'
 import { ethers } from 'ethers'
 import { alto } from 'prool/instances'
 import { paymaster } from '@pimlico/mock-paymaster'
@@ -719,4 +719,36 @@ describe('@wdk/wallet-evm-erc-4337', () => {
     expect(sentFeeB).toBe(feeB)
     quoteSpy.mockRestore()
   }, TIMEOUT)
+
+  test('should extract UserOperationV7 gas overrides from a transaction (number or bigint)', () => {
+    const TX = {
+      to: ACCOUNT1.safeAddress,
+      value: 0,
+      data: '0x',
+      callGasLimit: 250000,
+      verificationGasLimit: 150000n,
+      preVerificationGas: 50000,
+      maxFeePerGas: 2_000_000_000n,
+      maxPriorityFeePerGas: 1_500_000_000
+    }
+
+    const overrides = WalletAccountReadOnlyEvmErc4337._extractGasOverrides(TX)
+
+    expect(overrides).toEqual({
+      callGasLimit: 250000n,
+      verificationGasLimit: 150000n,
+      preVerificationGas: 50000n,
+      maxFeePerGas: 2_000_000_000n,
+      maxPriorityFeePerGas: 1_500_000_000n
+    })
+
+    const noOverrides = WalletAccountReadOnlyEvmErc4337._extractGasOverrides({
+      to: ACCOUNT1.safeAddress,
+      value: 0,
+      callGasLimit: 100000
+    })
+    expect(noOverrides).toEqual({ callGasLimit: 100000n })
+
+    expect(WalletAccountReadOnlyEvmErc4337._extractGasOverrides()).toEqual({})
+  })
 })

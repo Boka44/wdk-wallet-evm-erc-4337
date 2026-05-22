@@ -93,13 +93,13 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
      * The result is cached internally for up to 2 minutes. If `sendTransaction` is called with the
      * same transaction within that window, the cached fee is reused without an additional RPC round-trip.
      *
-     * @param {EvmTransaction | EvmTransaction[]} tx - The transaction, or an array of multiple transactions to send in batch.
+     * @param {EvmErc4337Transaction | EvmErc4337Transaction[]} tx - The transaction, or an array of multiple transactions to send in batch.
      * @param {Partial<EvmErc4337WalletPaymasterTokenConfig | EvmErc4337WalletSponsorshipPolicyConfig | EvmErc4337WalletNativeCoinsConfig>} [config] - If set, overrides the given configuration options.
      * @returns {Promise<Omit<TransactionResult, 'hash'>>} The transaction's quotes.
      * @throws {ConfigurationError} If the override `config` is invalid or has missing required fields.
      * @throws {Error} If the token paymaster reports AA50 (account does not hold the paymaster token).
      */
-    quoteSendTransaction(tx: EvmTransaction | EvmTransaction[], config?: Partial<EvmErc4337WalletPaymasterTokenConfig | EvmErc4337WalletSponsorshipPolicyConfig | EvmErc4337WalletNativeCoinsConfig>): Promise<Omit<TransactionResult, "hash">>;
+    quoteSendTransaction(tx: EvmErc4337Transaction | EvmErc4337Transaction[], config?: Partial<EvmErc4337WalletPaymasterTokenConfig | EvmErc4337WalletSponsorshipPolicyConfig | EvmErc4337WalletNativeCoinsConfig>): Promise<Omit<TransactionResult, "hash">>;
     /**
      * Quotes the costs of a transfer operation.
      *
@@ -207,31 +207,79 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
      * @protected
      * @param {MetaTransaction[]} calls - The meta-transactions to include in the UserOperation.
      * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee'>} config - The wallet configuration.
+     * @param {Object} [txOverrides] - Optional UserOperationV7 gas overrides extracted from the input transaction(s).
      * @returns {Promise<BuiltUserOperation>} The built operation, signing context, and (in token mode) the paymaster quote.
      */
-    protected _buildUserOperation(calls: import('abstractionkit').MetaTransaction[], config: Omit<EvmErc4337WalletConfig, "transferMaxFee">): Promise<BuiltUserOperation>;
+    protected _buildUserOperation(calls: import('abstractionkit').MetaTransaction[], config: Omit<EvmErc4337WalletConfig, "transferMaxFee">, txOverrides?: any): Promise<BuiltUserOperation>;
+    /**
+     * Extracts the optional UserOperationV7 gas overrides from a single transaction.
+     *
+     * Only the fields actually consumed by AbstractionKit's `CreateUserOperationOverrides`
+     * are picked. Numeric values are coerced to bigint.
+     *
+     * @protected
+     * @param {EvmErc4337Transaction} [tx] - The transaction to read overrides from.
+     * @returns {Object} The overrides object (empty if `tx` is falsy or has no override fields).
+     */
+    protected static _extractGasOverrides(tx?: EvmErc4337Transaction): any;
     /**
      * Builds a UserOperation and returns its estimated gas cost.
      *
      * Returns the cost in the paymaster token when a token quote is available, otherwise in
      * native wei. Used by `quoteSendTransaction` and reused by `sendTransaction` via the cache.
      *
+     * In a batched call, only `txs[0]`'s gas overrides are honored — a UserOperation
+     * carries a single set of gas fields regardless of how many calls it batches.
+     *
      * @protected
-     * @param {EvmTransaction[]} txs - The EVM transactions to include in the UserOperation.
+     * @param {EvmErc4337Transaction[]} txs - The EVM transactions to include in the UserOperation.
      * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee'>} config - The wallet configuration to use for the build.
      * @returns {Promise<BuiltUserOperation & Omit<TransactionResult, 'hash'>>} The built operation plus its raw fee (no tolerance buffer applied).
      * @throws {Error} If the token paymaster reports AA50 (account does not hold the paymaster token).
      */
-    protected _getUserOperationGasCost(txs: EvmTransaction[], config: Omit<EvmErc4337WalletConfig, "transferMaxFee">): Promise<BuiltUserOperation & Omit<TransactionResult, "hash">>;
+    protected _getUserOperationGasCost(txs: EvmErc4337Transaction[], config: Omit<EvmErc4337WalletConfig, "transferMaxFee">): Promise<BuiltUserOperation & Omit<TransactionResult, "hash">>;
 }
 export type Eip1193Provider = import("ethers").Eip1193Provider;
-export type EvmTransaction = import("@tetherto/wdk-wallet-evm").EvmTransaction;
 export type TransactionResult = import("@tetherto/wdk-wallet-evm").TransactionResult;
 export type TransferOptions = import("@tetherto/wdk-wallet-evm").TransferOptions;
 export type TransferResult = import("@tetherto/wdk-wallet-evm").TransferResult;
 export type EvmTransactionReceipt = import("@tetherto/wdk-wallet-evm").EvmTransactionReceipt;
 export type TypedData = import("@tetherto/wdk-wallet-evm").TypedData;
 export type UserOperationReceipt = import('abstractionkit').UserOperationReceiptResult;
+export type EvmErc4337Transaction = {
+    /**
+     * - The call's recipient.
+     */
+    to: string;
+    /**
+     * - The amount of native coin to send to the recipient (in wei).
+     */
+    value: number | bigint;
+    /**
+     * - The call's data in hex format.
+     */
+    data?: string;
+    /**
+     * - Override for the UserOperation's callGasLimit.
+     */
+    callGasLimit?: number | bigint;
+    /**
+     * - Override for the UserOperation's verificationGasLimit.
+     */
+    verificationGasLimit?: number | bigint;
+    /**
+     * - Override for the UserOperation's preVerificationGas.
+     */
+    preVerificationGas?: number | bigint;
+    /**
+     * - Override for the UserOperation's maxFeePerGas (EIP-1559 cap). When unset, falls back to the bundler-fetched gas price.
+     */
+    maxFeePerGas?: number | bigint;
+    /**
+     * - Override for the UserOperation's maxPriorityFeePerGas.
+     */
+    maxPriorityFeePerGas?: number | bigint;
+};
 export type BuiltUserOperation = {
     /**
      * - The fully-populated UserOperation ready to sign.

@@ -20,7 +20,7 @@
 /** @typedef {import('@tetherto/wdk-wallet-evm').FeeRates} FeeRates */
 
 /** @typedef {import('@tetherto/wdk-wallet-evm').KeyPair} KeyPair */
-/** @typedef {import('@tetherto/wdk-wallet-evm').EvmTransaction} EvmTransaction */
+/** @typedef {import('./src/wallet-account-read-only-evm-erc-4337.js').EvmErc4337Transaction} EvmErc4337Transaction */
 /** @typedef {import('@tetherto/wdk-wallet-evm').TransactionResult} TransactionResult */
 /** @typedef {import('@tetherto/wdk-wallet-evm').TransferOptions} TransferOptions */
 /** @typedef {import('@tetherto/wdk-wallet-evm').TransferResult} TransferResult */
