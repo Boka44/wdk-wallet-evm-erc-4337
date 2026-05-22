@@ -662,6 +662,29 @@ describe('@wdk/wallet-evm-erc-4337', () => {
     quoteSpy.mockRestore()
   }, TIMEOUT)
 
+  test('should sign a user operation without broadcasting, then broadcast it manually via the bundler', async () => {
+    const account0 = await wallet.getAccountByPath("0'/0/0")
+    const account1 = await wallet.getAccountByPath("0'/0/1")
+
+    const balance1Before = await ethersProvider.getBalance(ACCOUNT1.safeAddress)
+
+    const TRANSACTION = {
+      to: ACCOUNT1.safeAddress,
+      value: ethers.parseEther('1')
+    }
+
+    const signedUserOp = await account0.signTransaction(TRANSACTION)
+
+    expect(signedUserOp.sender.toLowerCase()).toBe(ACCOUNT0.safeAddress.toLowerCase())
+
+    const hash = await account0._getBundler().sendUserOperation(signedUserOp, ENTRY_POINT_ADDRESS)
+
+    await waitForTx(hash, account1)
+
+    const balance1After = await ethersProvider.getBalance(ACCOUNT1.safeAddress)
+    expect(balance1After).toBe(balance1Before + ethers.parseEther('1'))
+  }, TIMEOUT)
+  
   test('should reuse bumped cached nonce for sequential quoted transactions', async () => {
     const account0 = await wallet.getAccountByPath("0'/0/0")
     account0._quoteCache.clear()
@@ -679,19 +702,21 @@ describe('@wdk/wallet-evm-erc-4337', () => {
 
     const { fee: feeA } = await account0.quoteSendTransaction(TX_A)
     const { fee: feeB } = await account0.quoteSendTransaction(TX_B)
+
     expect(quoteSpy).toHaveBeenCalledTimes(2)
 
     const { hash: hashA, fee: sentFeeA } = await account0.sendTransaction(TX_A)
+
     await waitForTx(hashA, account0)
+
     expect(quoteSpy).toHaveBeenCalledTimes(2)
 
     const { hash: hashB, fee: sentFeeB } = await account0.sendTransaction(TX_B)
     await waitForTx(hashB, account0)
-    expect(quoteSpy).toHaveBeenCalledTimes(2)
 
+    expect(quoteSpy).toHaveBeenCalledTimes(2)
     expect(sentFeeA).toBe(feeA)
     expect(sentFeeB).toBe(feeB)
-
     quoteSpy.mockRestore()
   }, TIMEOUT)
 })
