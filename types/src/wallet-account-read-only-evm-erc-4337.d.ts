@@ -93,6 +93,9 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
      * The result is cached internally for up to 2 minutes. If `sendTransaction` is called with the
      * same transaction within that window, the cached fee is reused without an additional RPC round-trip.
      *
+     * In a batched call (`tx` passed as `[tx1, tx2, ...]`), only the gas overrides on `tx1` are
+     * honored — a UserOperation has a single set of gas fields regardless of how many calls it batches.
+     *
      * @param {EvmErc4337Transaction | EvmErc4337Transaction[]} tx - The transaction, or an array of multiple transactions to send in batch.
      * @param {Partial<EvmErc4337WalletPaymasterTokenConfig | EvmErc4337WalletSponsorshipPolicyConfig | EvmErc4337WalletNativeCoinsConfig>} [config] - If set, overrides the given configuration options.
      * @returns {Promise<Omit<TransactionResult, 'hash'>>} The transaction's quotes.

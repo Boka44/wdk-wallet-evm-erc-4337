@@ -72,15 +72,6 @@ export const FEE_TOLERANCE_COEFFICIENT = 120n
 /**
  * An EVM transaction shape used to build an ERC-4337 UserOperation.
  *
- * The `to`, `value`, and `data` fields describe a single call that gets encoded
- * into the UserOperation's `callData`. The remaining optional fields are
- * UserOperationV7 gas overrides: when set, they bypass bundler estimation for
- * that field and are forwarded to AbstractionKit's `createUserOperation` overrides.
- *
- * In a batched call (`sendTransaction([tx1, tx2, ...])`), only the gas overrides
- * on `tx1` are honored — a UserOperation has a single set of gas fields regardless
- * of how many calls it batches.
- *
  * @typedef {Object} EvmErc4337Transaction
  * @property {string} to - The call's recipient.
  * @property {number | bigint} value - The amount of native coin to send to the recipient (in wei).
@@ -289,6 +280,9 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
    *
    * The result is cached internally for up to 2 minutes. If `sendTransaction` is called with the
    * same transaction within that window, the cached fee is reused without an additional RPC round-trip.
+   *
+   * In a batched call (`tx` passed as `[tx1, tx2, ...]`), only the gas overrides on `tx1` are
+   * honored — a UserOperation has a single set of gas fields regardless of how many calls it batches.
    *
    * @param {EvmErc4337Transaction | EvmErc4337Transaction[]} tx - The transaction, or an array of multiple transactions to send in batch.
    * @param {Partial<EvmErc4337WalletPaymasterTokenConfig | EvmErc4337WalletSponsorshipPolicyConfig | EvmErc4337WalletNativeCoinsConfig>} [config] - If set, overrides the given configuration options.
