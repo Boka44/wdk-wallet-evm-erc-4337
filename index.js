@@ -21,6 +21,7 @@
 
 /** @typedef {import('@tetherto/wdk-wallet-evm').KeyPair} KeyPair */
 /** @typedef {import('./src/wallet-account-read-only-evm-erc-4337.js').EvmErc4337Transaction} EvmErc4337Transaction */
+/** @typedef {import('./src/wallet-account-read-only-evm-erc-4337.js').EvmErc4337GasOverrides} EvmErc4337GasOverrides */
 /** @typedef {import('@tetherto/wdk-wallet-evm').TransactionResult} TransactionResult */
 /** @typedef {import('@tetherto/wdk-wallet-evm').TransferOptions} TransferOptions */
 /** @typedef {import('@tetherto/wdk-wallet-evm').TransferResult} TransferResult */

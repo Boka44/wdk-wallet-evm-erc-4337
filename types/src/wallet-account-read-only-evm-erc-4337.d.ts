@@ -210,10 +210,10 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
      * @protected
      * @param {MetaTransaction[]} calls - The meta-transactions to include in the UserOperation.
      * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee'>} config - The wallet configuration.
-     * @param {Pick<EvmErc4337Transaction, 'callGasLimit' | 'verificationGasLimit' | 'preVerificationGas' | 'maxFeePerGas' | 'maxPriorityFeePerGas'>} [txOverrides] - Optional UserOperationV7 gas overrides extracted from the input transaction(s).
+     * @param {EvmErc4337GasOverrides} [txOverrides] - Optional UserOperationV7 gas overrides extracted from the input transaction(s).
      * @returns {Promise<BuiltUserOperation>} The built operation, signing context, and (in token mode) the paymaster quote.
      */
-    protected _buildUserOperation(calls: import('abstractionkit').MetaTransaction[], config: Omit<EvmErc4337WalletConfig, "transferMaxFee">, txOverrides?: Pick<EvmErc4337Transaction, "callGasLimit" | "verificationGasLimit" | "preVerificationGas" | "maxFeePerGas" | "maxPriorityFeePerGas">): Promise<BuiltUserOperation>;
+    protected _buildUserOperation(calls: import('abstractionkit').MetaTransaction[], config: Omit<EvmErc4337WalletConfig, "transferMaxFee">, txOverrides?: EvmErc4337GasOverrides): Promise<BuiltUserOperation>;
     /**
      * Extracts the optional UserOperationV7 gas overrides from a single transaction.
      *
@@ -222,9 +222,9 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
      *
      * @protected
      * @param {EvmErc4337Transaction} [tx] - The transaction to read overrides from.
-     * @returns {Object} The overrides object (empty if `tx` is falsy or has no override fields).
+     * @returns {EvmErc4337GasOverrides} The overrides object (empty if `tx` is falsy or has no override fields).
      */
-    protected static _extractGasOverrides(tx?: EvmErc4337Transaction): any;
+    protected static _extractGasOverrides(tx?: EvmErc4337Transaction): EvmErc4337GasOverrides;
     /**
      * Builds a UserOperation and returns its estimated gas cost.
      *
@@ -282,6 +282,35 @@ export type EvmErc4337Transaction = {
      * - If set, overrides the user operations' max priority fee per gas. Treated as a pair with `maxFeePerGas`: setting either disables the bundler-fetched fee fallback for both.
      */
     maxPriorityFeePerGas?: number | bigint;
+};
+/**
+ * Gas-related UserOperationV7 overrides, coerced to `bigint`.
+ *
+ * Produced by `_extractGasOverrides` from an `EvmErc4337Transaction` and threaded into
+ * `_buildUserOperation`. All fields are optional; absent fields fall back to the bundler-fetched
+ * gas price (fee pair) or AbstractionKit's gas estimation (gas limits).
+ */
+export type EvmErc4337GasOverrides = {
+    /**
+     * - Override for the UserOperation's call gas limit.
+     */
+    callGasLimit?: bigint;
+    /**
+     * - Override for the UserOperation's verification gas limit.
+     */
+    verificationGasLimit?: bigint;
+    /**
+     * - Override for the UserOperation's pre-verification gas.
+     */
+    preVerificationGas?: bigint;
+    /**
+     * - Override for the UserOperation's max fee per gas (EIP-1559 cap).
+     */
+    maxFeePerGas?: bigint;
+    /**
+     * - Override for the UserOperation's max priority fee per gas.
+     */
+    maxPriorityFeePerGas?: bigint;
 };
 export type BuiltUserOperation = {
     /**

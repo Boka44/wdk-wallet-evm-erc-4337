@@ -84,6 +84,21 @@ export const FEE_TOLERANCE_COEFFICIENT = 120n
  */
 
 /**
+ * Gas-related UserOperationV7 overrides, coerced to `bigint`.
+ *
+ * Produced by `_extractGasOverrides` from an `EvmErc4337Transaction` and threaded into
+ * `_buildUserOperation`. All fields are optional; absent fields fall back to the bundler-fetched
+ * gas price (fee pair) or AbstractionKit's gas estimation (gas limits).
+ *
+ * @typedef {Object} EvmErc4337GasOverrides
+ * @property {bigint} [callGasLimit] - Override for the UserOperation's call gas limit.
+ * @property {bigint} [verificationGasLimit] - Override for the UserOperation's verification gas limit.
+ * @property {bigint} [preVerificationGas] - Override for the UserOperation's pre-verification gas.
+ * @property {bigint} [maxFeePerGas] - Override for the UserOperation's max fee per gas (EIP-1559 cap).
+ * @property {bigint} [maxPriorityFeePerGas] - Override for the UserOperation's max priority fee per gas.
+ */
+
+/**
  * @typedef {Object} OnChainIdentifier
  * @property {string} project - The project name included in the 50-byte on-chain marker.
  * @property {'Web' | 'Mobile' | 'Safe App' | 'Widget'} [platform] - The platform type (default: 'Web').
@@ -601,7 +616,7 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
    * @protected
    * @param {MetaTransaction[]} calls - The meta-transactions to include in the UserOperation.
    * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee'>} config - The wallet configuration.
-   * @param {Pick<EvmErc4337Transaction, 'callGasLimit' | 'verificationGasLimit' | 'preVerificationGas' | 'maxFeePerGas' | 'maxPriorityFeePerGas'>} [txOverrides] - Optional UserOperationV7 gas overrides extracted from the input transaction(s).
+   * @param {EvmErc4337GasOverrides} [txOverrides] - Optional UserOperationV7 gas overrides extracted from the input transaction(s).
    * @returns {Promise<BuiltUserOperation>} The built operation, signing context, and (in token mode) the paymaster quote.
    */
   async _buildUserOperation (calls, config, txOverrides = {}) {
@@ -642,7 +657,7 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
    *
    * @protected
    * @param {EvmErc4337Transaction} [tx] - The transaction to read overrides from.
-   * @returns {Object} The overrides object (empty if `tx` is falsy or has no override fields).
+   * @returns {EvmErc4337GasOverrides} The overrides object (empty if `tx` is falsy or has no override fields).
    */
   static _extractGasOverrides (tx) {
     const overrides = {}
