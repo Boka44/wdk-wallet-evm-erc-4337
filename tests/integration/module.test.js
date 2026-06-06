@@ -629,7 +629,7 @@ describe('@wdk/wallet-evm-erc-4337', () => {
     quoteSpy.mockRestore()
   }, TIMEOUT)
 
-  test('should preserve and bump cached transfer quote when another tx is sent in between', async () => {
+  test('should re-quote a cached transfer whose nonce is stale after an intervening send', async () => {
     const account0 = await wallet.getAccountByPath("0'/0/0")
     account0._quoteCache.clear()
     const quoteSpy = jest.spyOn(account0, 'quoteSendTransaction')
@@ -642,6 +642,7 @@ describe('@wdk/wallet-evm-erc-4337', () => {
 
     const { fee: quotedFee } = await account0.quoteTransfer(TRANSFER)
     expect(quoteSpy).toHaveBeenCalledTimes(1)
+    expect(quotedFee).toBeGreaterThan(0n)
 
     const APPROVE_TRANSACTION = {
       to: testToken.target,
@@ -655,9 +656,8 @@ describe('@wdk/wallet-evm-erc-4337', () => {
 
     const { hash, fee: transferFee } = await account0.transfer(TRANSFER)
     await waitForTx(hash, account0)
-    expect(quoteSpy).toHaveBeenCalledTimes(2)
-
-    expect(transferFee).toBe(quotedFee)
+    expect(quoteSpy).toHaveBeenCalledTimes(3)
+    expect(transferFee).toBeGreaterThan(0n)
 
     quoteSpy.mockRestore()
   }, TIMEOUT)
@@ -685,7 +685,7 @@ describe('@wdk/wallet-evm-erc-4337', () => {
     expect(balance1After).toBe(balance1Before + ethers.parseEther('1'))
   }, TIMEOUT)
   
-  test('should reuse bumped cached nonce for sequential quoted transactions', async () => {
+  test('should reuse the first quote and re-quote the second once the first has mined', async () => {
     const account0 = await wallet.getAccountByPath("0'/0/0")
     account0._quoteCache.clear()
     const quoteSpy = jest.spyOn(account0, 'quoteSendTransaction')
@@ -704,19 +704,20 @@ describe('@wdk/wallet-evm-erc-4337', () => {
     const { fee: feeB } = await account0.quoteSendTransaction(TX_B)
 
     expect(quoteSpy).toHaveBeenCalledTimes(2)
+    expect(feeB).toBeGreaterThan(0n)
 
     const { hash: hashA, fee: sentFeeA } = await account0.sendTransaction(TX_A)
 
     await waitForTx(hashA, account0)
 
     expect(quoteSpy).toHaveBeenCalledTimes(2)
+    expect(sentFeeA).toBe(feeA)
 
     const { hash: hashB, fee: sentFeeB } = await account0.sendTransaction(TX_B)
     await waitForTx(hashB, account0)
 
-    expect(quoteSpy).toHaveBeenCalledTimes(2)
-    expect(sentFeeA).toBe(feeA)
-    expect(sentFeeB).toBe(feeB)
+    expect(quoteSpy).toHaveBeenCalledTimes(3)
+    expect(sentFeeB).toBeGreaterThan(0n)
     quoteSpy.mockRestore()
   }, TIMEOUT)
 

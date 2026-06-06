@@ -154,11 +154,7 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
       this._validateConfig(mergedConfig)
     }
 
-    let cached = this._consumeCachedQuote(tx)
-    if (!cached) {
-      await this.quoteSendTransaction(tx, config)
-      cached = this._consumeCachedQuote(tx)
-    }
+    const cached = await this._resolveQuote(tx, config)
 
     const { userOp } = await this._signUserOperation([tx], { config: mergedConfig, cachedBuild: cached })
 
@@ -206,8 +202,9 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
   /**
    * Quotes the costs of a send transaction operation.
    *
-   * The result is cached internally for up to 2 minutes. If `sendTransaction` is called with the
-   * same transaction within that window, the cached fee is reused without an additional RPC round-trip.
+   * The result is cached internally for up to 2 minutes. A subsequent `sendTransaction` with the
+   * same transaction reuses the cached operation — skipping the gas-estimation and paymaster
+   * round-trips — after a lightweight on-chain nonce check, re-quoting only if the nonce has moved.
    *
    * In a batched call (`tx` passed as `[tx1, tx2, ...]`), only the gas overrides on `tx1` are
    * honored — a UserOperation has a single set of gas fields regardless of how many calls it batches.
@@ -262,17 +259,11 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
       this._validateConfig(mergedConfig)
     }
 
-    let cached = this._consumeCachedQuote(tx)
-    if (!cached) {
-      await this.quoteSendTransaction(tx, config)
-      cached = this._consumeCachedQuote(tx)
-    }
+    const cached = await this._resolveQuote(tx, config)
 
     const fee = cached.fee
 
     const hash = await this._sendUserOperation([tx].flat(), { config: mergedConfig, cachedBuild: cached })
-
-    await this._bumpCachedNonces()
 
     return { hash, fee }
   }
@@ -295,11 +286,7 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
 
     const tx = await WalletAccountEvm._getTransferTransaction(options)
 
-    let cached = this._consumeCachedQuote(tx)
-    if (!cached) {
-      await this.quoteSendTransaction(tx, config)
-      cached = this._consumeCachedQuote(tx)
-    }
+    const cached = await this._resolveQuote(tx, config)
 
     const fee = cached.fee
 
@@ -308,8 +295,6 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
     }
 
     const hash = await this._sendUserOperation([tx], { config: mergedConfig, cachedBuild: cached })
-
-    await this._bumpCachedNonces()
 
     return { hash, fee }
   }
@@ -335,34 +320,20 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
   }
 
   /** @private */
-  async _bumpCachedNonces () {
-    const entriesWithUserOp = [...this._quoteCache.entries()].filter(([, { userOp }]) => userOp)
+  async _resolveQuote (tx, config) {
+    let cached = this._consumeCachedQuote(tx)
 
-    if (entriesWithUserOp.length === 0) return
+    if (cached?.userOp) {
+      const onChainNonce = await fetchAccountNonce(this._provider, cached.smartAccount.entrypointAddress, cached.smartAccount.accountAddress)
+      if (cached.userOp.nonce !== onChainNonce) cached = undefined
+    }
 
-    const [, firstQuote] = entriesWithUserOp[0]
-    const onChainNonce = await fetchAccountNonce(this._provider, firstQuote.smartAccount.entrypointAddress, firstQuote.smartAccount.accountAddress)
+    if (!cached) {
+      await this.quoteSendTransaction(tx, config)
+      cached = this._consumeCachedQuote(tx)
+    }
 
-    const mode = WalletAccountReadOnlyEvmErc4337._resolvePaymasterMode(this._config)
-
-    await Promise.all(entriesWithUserOp.map(async ([txKey, quote]) => {
-      quote.userOp.nonce = onChainNonce + 1n
-
-      if (mode !== 'native') {
-        try {
-          const { userOp } = await this._applyPaymasterToUserOp({
-            mode,
-            smartAccount: quote.smartAccount,
-            userOp: quote.userOp,
-            config: this._config,
-            chainId: quote.chainId
-          })
-          quote.userOp = userOp
-        } catch {
-          this._quoteCache.delete(txKey)
-        }
-      }
-    }))
+    return cached
   }
 
   /** @private */
