@@ -443,6 +443,33 @@ describe('@wdk/wallet-evm-erc-4337', () => {
       .rejects.toThrow('Exceeded maximum fee cost for transfer operation.')
   }, TIMEOUT)
 
+  test('should create a wallet with a low transaction max fee, derive an account, try to send a transaction and gracefully fail', async () => {
+    const config = {
+      chainId: 1,
+      provider: 'http://localhost:8545',
+      bundlerUrl: 'http://localhost:4337',
+      paymasterUrl: 'http://localhost:3000?pimlico',
+      paymasterAddress: paymasterAddress,
+      safeModulesVersion: '0.3.0',
+      paymasterToken: {
+        address: MOCK_PAYMASTER_TOKEN_ADDRESS
+      },
+      transactionMaxFee: 100
+    }
+
+    const wallet = new WalletManagerEvmErc4337(SEED_PHRASE, config)
+
+    const account = await wallet.getAccount(0)
+
+    const TX = {
+      to: '0xa460AEbce0d3A4BecAd8ccf9D6D4861296c503Bd',
+      value: 0
+    }
+
+    await expect(account.sendTransaction(TX))
+      .rejects.toThrow('Exceeded maximum fee cost for transaction operation.')
+  }, TIMEOUT)
+
   test('should use cached fee when sendTransaction is called with the same quoted params', async () => {
     const account0 = await wallet.getAccountByPath("0'/0/0")
     account0._quoteCache.clear()

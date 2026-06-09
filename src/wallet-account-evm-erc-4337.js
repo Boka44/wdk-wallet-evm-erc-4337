@@ -156,6 +156,13 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
 
     const cached = await this._resolveQuote(tx, config)
 
+    const fee = cached.fee
+
+    const { isSponsored, transactionMaxFee } = mergedConfig
+    if (!isSponsored && transactionMaxFee !== undefined && fee >= transactionMaxFee) {
+      throw new Error('Exceeded maximum fee cost for transaction operation.')
+    }
+
     const { userOp } = await this._signUserOperation([tx], { config: mergedConfig, cachedBuild: cached })
 
     this._quoteCache.clear()
@@ -262,6 +269,11 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
     const cached = await this._resolveQuote(tx, config)
 
     const fee = cached.fee
+
+    const { isSponsored, transactionMaxFee } = mergedConfig
+    if (!isSponsored && transactionMaxFee !== undefined && fee >= transactionMaxFee) {
+      throw new Error('Exceeded maximum fee cost for transaction operation.')
+    }
 
     const hash = await this._sendUserOperation([tx].flat(), { config: mergedConfig, cachedBuild: cached })
 

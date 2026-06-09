@@ -24,14 +24,14 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
      * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee'>} config - The configuration object.
      * @throws {ConfigurationError} If `config.safeModulesVersion` is not in the supported set.
      */
-    constructor(address: string, config: Omit<EvmErc4337WalletConfig, "transferMaxFee">);
+    constructor(address: string, config: Omit<EvmErc4337WalletConfig, "transferMaxFee" | "transactionMaxFee">);
     /**
      * The read-only evm erc-4337 wallet account configuration.
      *
      * @protected
      * @type {Omit<EvmErc4337WalletConfig, 'transferMaxFee'>}
      */
-    protected _config: Omit<EvmErc4337WalletConfig, "transferMaxFee">;
+    protected _config: Omit<EvmErc4337WalletConfig, "transferMaxFee" | "transactionMaxFee">;
     /**
      * An EIP-1193–compatible provider used to interact with the blockchain.
      *
@@ -162,7 +162,7 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
      * @throws {ConfigurationError} If the configuration is invalid or has missing required fields.
      * @returns {void}
      */
-    protected _validateConfig(config: Omit<EvmErc4337WalletConfig, "transferMaxFee">): void;
+    protected _validateConfig(config: Omit<EvmErc4337WalletConfig, "transferMaxFee" | "transactionMaxFee">): void;
     /**
      * Builds a safe account instance for the current owner.
      *
@@ -170,7 +170,7 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
      * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee'>} [config] - The wallet configuration. Defaults to the instance configuration.
      * @returns {Promise<SafeAccountV0_3_0>} The safe account instance.
      */
-    protected _getSmartAccount(config?: Omit<EvmErc4337WalletConfig, "transferMaxFee">): Promise<import('abstractionkit').SafeAccountV0_3_0>;
+    protected _getSmartAccount(config?: Omit<EvmErc4337WalletConfig, "transferMaxFee" | "transactionMaxFee">): Promise<import('abstractionkit').SafeAccountV0_3_0>;
     /**
      * Returns an AbstractionKit Bundler for querying UserOperations.
      *
@@ -201,7 +201,7 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
      * @returns {Eip1193Provider} A wrapped Eip1193Provider instance.
      * @throws {Error} If the `provider` option is set to an empty array.
      */
-    protected _createFailoverProvider (config?: Omit<EvmErc4337WalletConfig, "transferMaxFee">): Eip1193Provider
+    protected _createFailoverProvider (config?: Omit<EvmErc4337WalletConfig, "transferMaxFee" | "transactionMaxFee">): Eip1193Provider
     /** @private */
     private _getEvmReadOnlyAccount;
     /**
@@ -213,7 +213,7 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
      * @param {EvmErc4337GasOverrides} [txOverrides] - Optional UserOperationV7 gas overrides extracted from the input transaction(s).
      * @returns {Promise<BuiltUserOperation>} The built operation, signing context, and (in token mode) the paymaster quote.
      */
-    protected _buildUserOperation(calls: import('abstractionkit').MetaTransaction[], config: Omit<EvmErc4337WalletConfig, "transferMaxFee">, txOverrides?: EvmErc4337GasOverrides): Promise<BuiltUserOperation>;
+    protected _buildUserOperation(calls: import('abstractionkit').MetaTransaction[], config: Omit<EvmErc4337WalletConfig, "transferMaxFee" | "transactionMaxFee">, txOverrides?: EvmErc4337GasOverrides): Promise<BuiltUserOperation>;
     /**
      * Extracts the optional UserOperationV7 gas overrides from a single transaction.
      *
@@ -240,7 +240,7 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
      * @returns {Promise<BuiltUserOperation & Omit<TransactionResult, 'hash'>>} The built operation plus its raw fee (no tolerance buffer applied).
      * @throws {Error} If the token paymaster reports AA50 (account does not hold the paymaster token).
      */
-    protected _getUserOperationGasCost(txs: EvmErc4337Transaction[], config: Omit<EvmErc4337WalletConfig, "transferMaxFee">): Promise<BuiltUserOperation & Omit<TransactionResult, "hash">>;
+    protected _getUserOperationGasCost(txs: EvmErc4337Transaction[], config: Omit<EvmErc4337WalletConfig, "transferMaxFee" | "transactionMaxFee">): Promise<BuiltUserOperation & Omit<TransactionResult, "hash">>;
 }
 export type Eip1193Provider = import("ethers").Eip1193Provider;
 export type TransactionResult = import("@tetherto/wdk-wallet-evm").TransactionResult;
@@ -405,6 +405,10 @@ export type EvmErc4337WalletPaymasterTokenConfig = {
      * - The maximum fee amount for transfer operations.
      */
     transferMaxFee?: number | bigint;
+    /**
+     * - The maximum fee amount for sendTransaction and signTransaction operations.
+     */
+    transactionMaxFee?: number | bigint;
 };
 export type EvmErc4337WalletSponsorshipPolicyConfig = {
     /**
@@ -437,6 +441,10 @@ export type EvmErc4337WalletNativeCoinsConfig = {
      * - The maximum fee amount for transfer operations.
      */
     transferMaxFee?: number | bigint;
+    /**
+     * - The maximum fee amount for sendTransaction and signTransaction operations.
+     */
+    transactionMaxFee?: number | bigint;
 };
 export type EvmErc4337WalletConfig = EvmErc4337WalletCommonConfig & (EvmErc4337WalletPaymasterTokenConfig | EvmErc4337WalletSponsorshipPolicyConfig | EvmErc4337WalletNativeCoinsConfig);
 import { WalletAccountReadOnly } from '@tetherto/wdk-wallet';

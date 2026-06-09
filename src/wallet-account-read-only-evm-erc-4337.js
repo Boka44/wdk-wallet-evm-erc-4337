@@ -125,6 +125,7 @@ export const FEE_TOLERANCE_COEFFICIENT = 120n
  * @property {Object} paymasterToken - The paymaster token configuration.
  * @property {string} paymasterToken.address - The address of the paymaster token.
  * @property {number | bigint} [transferMaxFee] - The maximum fee amount for transfer operations.
+ * @property {number | bigint} [transactionMaxFee] - The maximum fee amount for sendTransaction and signTransaction operations.
  */
 
 /**
@@ -140,6 +141,7 @@ export const FEE_TOLERANCE_COEFFICIENT = 120n
  * @property {false} [isSponsored] - Whether the paymaster is sponsoring the account.
  * @property {true} useNativeCoins - Whether to use native coins instead of a paymaster to pay for gas fees.
  * @property {number | bigint} [transferMaxFee] - The maximum fee amount for transfer operations.
+ * @property {number | bigint} [transactionMaxFee] - The maximum fee amount for sendTransaction and signTransaction operations.
  */
 
 /**
@@ -160,7 +162,7 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
    * Creates a new read-only evm [erc-4337](https://www.erc4337.io/docs) wallet account.
    *
    * @param {string} address - The evm account's address.
-   * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee'>} config - The configuration object.
+   * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee' | 'transactionMaxFee'>} config - The configuration object.
    * @throws {ConfigurationError} If `config.safeModulesVersion` is not in the supported set.
    */
   constructor (address, config) {
@@ -176,7 +178,7 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
      * The read-only evm erc-4337 wallet account configuration.
      *
      * @protected
-     * @type {Omit<EvmErc4337WalletConfig, 'transferMaxFee'>}
+     * @type {Omit<EvmErc4337WalletConfig, 'transferMaxFee' | 'transactionMaxFee'>}
      */
     this._config = config
 
@@ -415,7 +417,7 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
    * Validates the configuration to ensure all required fields are present.
    *
    * @protected
-   * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee'>} config - The configuration to validate.
+   * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee' | 'transactionMaxFee'>} config - The configuration to validate.
    * @throws {ConfigurationError} If the configuration is invalid or has missing required fields.
    * @returns {void}
    */
@@ -456,7 +458,7 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
    * Builds a safe account instance for the current owner.
    *
    * @protected
-   * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee'>} [config] - The wallet configuration. Defaults to the instance configuration.
+   * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee' | 'transactionMaxFee'>} [config] - The wallet configuration. Defaults to the instance configuration.
    * @returns {Promise<SafeAccountV0_3_0>} The safe account instance.
    */
   async _getSmartAccount (config = this._config) {
@@ -533,7 +535,7 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
    * Creates a FailoverProvider from the configured providers. If only one provider is supplied, it is wrapped and returned.
    *
    * @protected
-   * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee'>} [config] - The configuration object.
+   * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee' | 'transactionMaxFee'>} [config] - The configuration object.
    * @returns {Eip1193Provider} A wrapped Eip1193Provider instance.
    * @throws {Error} If the `provider` option is set to an empty array.
    */
@@ -615,7 +617,7 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
    *
    * @protected
    * @param {MetaTransaction[]} calls - The meta-transactions to include in the UserOperation.
-   * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee'>} config - The wallet configuration.
+   * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee' | 'transactionMaxFee'>} config - The wallet configuration.
    * @param {EvmErc4337GasOverrides} [txOverrides] - Optional UserOperationV7 gas overrides extracted from the input transaction(s).
    * @returns {Promise<BuiltUserOperation>} The built operation, signing context, and (in token mode) the paymaster quote.
    */
@@ -682,7 +684,7 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
    *
    * @protected
    * @param {EvmErc4337Transaction[]} txs - The EVM transactions to include in the UserOperation.
-   * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee'>} config - The wallet configuration to use for the build.
+   * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee' | 'transactionMaxFee'>} config - The wallet configuration to use for the build.
    * @returns {Promise<BuiltUserOperation & Omit<TransactionResult, 'hash'>>} The built operation plus its raw fee (no tolerance buffer applied).
    * @throws {Error} If the token paymaster reports AA50 (account does not hold the paymaster token).
    */
