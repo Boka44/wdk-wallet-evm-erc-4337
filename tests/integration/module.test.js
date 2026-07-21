@@ -924,4 +924,81 @@ describe('@wdk/wallet-evm-erc-4337', () => {
 
     buildSpy.mockRestore()
   }, TIMEOUT)
+
+  describe('nonce lanes', () => {
+    const MAX_UINT64 = (1n << 64n) - 1n
+
+    test('should send two parallel-lane transactions concurrently from a deployed account without touching the key-0 nonce', async () => {
+      const account0 = await wallet.getAccountByPath("0'/0/0")
+
+      const warm = await account0.sendTransaction({ to: ACCOUNT1.safeAddress, value: 0 })
+      await waitForTx(warm.hash, account0)
+
+      const key0Before = await fetchAccountNonce('http://localhost:8545', ENTRY_POINT_ADDRESS, ACCOUNT0.safeAddress)
+
+      const [resA, resB] = await Promise.all([
+        account0.sendTransaction({ to: ACCOUNT1.safeAddress, value: 0 }, { parallel: true }),
+        account0.sendTransaction({ to: ACCOUNT0.safeAddress, value: 0 }, { parallel: true })
+      ])
+
+      expect(resA.hash).not.toBe(resB.hash)
+
+      const [receiptA, receiptB] = await Promise.all([
+        waitForTx(resA.hash, account0),
+        waitForTx(resB.hash, account0)
+      ])
+      expect(receiptA.status).toBe(1)
+      expect(receiptB.status).toBe(1)
+
+      const key0After = await fetchAccountNonce('http://localhost:8545', ENTRY_POINT_ADDRESS, ACCOUNT0.safeAddress)
+      expect(key0After).toBe(key0Before)
+    }, TIMEOUT)
+
+    test('should advance a named lane sequence across two sends', async () => {
+      const account0 = await wallet.getAccountByPath("0'/0/0")
+      const LANE_KEY = BigInt(ethers.keccak256(ethers.toUtf8Bytes('payments'))) & ((1n << 192n) - 1n)
+
+      const seqBefore = (await fetchAccountNonce('http://localhost:8545', ENTRY_POINT_ADDRESS, ACCOUNT0.safeAddress, LANE_KEY)) & MAX_UINT64
+
+      const resA = await account0.sendTransaction({ to: ACCOUNT1.safeAddress, value: 0 }, { nonceKey: 'payments' })
+      await waitForTx(resA.hash, account0)
+      const resB = await account0.sendTransaction({ to: ACCOUNT1.safeAddress, value: 0 }, { nonceKey: 'payments' })
+      await waitForTx(resB.hash, account0)
+
+      const seqAfter = (await fetchAccountNonce('http://localhost:8545', ENTRY_POINT_ADDRESS, ACCOUNT0.safeAddress, LANE_KEY)) & MAX_UINT64
+      expect(seqAfter).toBe(seqBefore + 2n)
+    }, TIMEOUT)
+
+    test('should prefer an explicit nonceKey over parallel', async () => {
+      const account0 = await wallet.getAccountByPath("0'/0/0")
+      const LANE_KEY = 42n
+
+      const seqBefore = (await fetchAccountNonce('http://localhost:8545', ENTRY_POINT_ADDRESS, ACCOUNT0.safeAddress, LANE_KEY)) & MAX_UINT64
+
+      const res = await account0.sendTransaction({ to: ACCOUNT1.safeAddress, value: 0 }, { parallel: true, nonceKey: LANE_KEY })
+      const receipt = await waitForTx(res.hash, account0)
+      expect(receipt.status).toBe(1)
+
+      const seqAfter = (await fetchAccountNonce('http://localhost:8545', ENTRY_POINT_ADDRESS, ACCOUNT0.safeAddress, LANE_KEY)) & MAX_UINT64
+      expect(seqAfter).toBe(seqBefore + 1n)
+    }, TIMEOUT)
+
+    test('should transfer tokens through a named lane', async () => {
+      const account0 = await wallet.getAccountByPath("0'/0/0")
+      const LANE_KEY = BigInt(ethers.keccak256(ethers.toUtf8Bytes('payroll'))) & ((1n << 192n) - 1n)
+
+      const seqBefore = (await fetchAccountNonce('http://localhost:8545', ENTRY_POINT_ADDRESS, ACCOUNT0.safeAddress, LANE_KEY)) & MAX_UINT64
+
+      const { hash } = await account0.transfer({
+        token: testToken.target,
+        recipient: ACCOUNT1.safeAddress,
+        amount: 1n
+      }, { nonceKey: 'payroll' })
+      const receipt = await waitForTx(hash, account0)
+      expect(receipt.status).toBe(1)
+
+      const seqAfter = (await fetchAccountNonce('http://localhost:8545', ENTRY_POINT_ADDRESS, ACCOUNT0.safeAddress, LANE_KEY)) & MAX_UINT64
+      expect(seqAfter).toBe(seqBefore + 1n)
+    }, TIMEOUT)
+  })
 })

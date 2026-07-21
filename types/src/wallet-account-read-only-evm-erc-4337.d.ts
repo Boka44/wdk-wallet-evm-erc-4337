@@ -211,10 +211,10 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
      * @protected
      * @param {MetaTransaction[]} calls - The meta-transactions to include in the UserOperation.
      * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee'>} config - The wallet configuration.
-     * @param {EvmErc4337GasOverrides} [txOverrides] - Optional UserOperationV7 gas overrides extracted from the input transaction(s).
+     * @param {EvmErc4337BuildOverrides} [txOverrides] - Optional UserOperationV7 gas overrides extracted from the input transaction(s), plus an optional explicit lane `nonce`.
      * @returns {Promise<BuiltUserOperation>} The built operation, signing context, and (in token mode) the paymaster quote.
      */
-    protected _buildUserOperation(calls: import('abstractionkit').MetaTransaction[], config: Omit<EvmErc4337WalletConfig, "transferMaxFee" | "transactionMaxFee">, txOverrides?: EvmErc4337GasOverrides): Promise<BuiltUserOperation>;
+    protected _buildUserOperation(calls: import('abstractionkit').MetaTransaction[], config: Omit<EvmErc4337WalletConfig, "transferMaxFee" | "transactionMaxFee">, txOverrides?: EvmErc4337BuildOverrides): Promise<BuiltUserOperation>;
     /**
      * Extracts the optional UserOperationV7 gas overrides from a single transaction.
      *
@@ -313,6 +313,38 @@ export type EvmErc4337GasOverrides = {
      */
     maxPriorityFeePerGas?: bigint;
 };
+/**
+ * Build-time UserOperationV7 overrides passed to `_buildUserOperation`: the gas overrides plus an
+ * optional explicit `nonce` used to place the operation in a specific two-dimensional nonce lane.
+ * The `nonce` is derived internally from the account's `parallel`/`nonceKey` configuration, never
+ * from user-supplied transaction fields.
+ */
+export type EvmErc4337BuildOverrides = {
+    /**
+     * - Override for the UserOperation's call gas limit.
+     */
+    callGasLimit?: bigint;
+    /**
+     * - Override for the UserOperation's verification gas limit.
+     */
+    verificationGasLimit?: bigint;
+    /**
+     * - Override for the UserOperation's pre-verification gas.
+     */
+    preVerificationGas?: bigint;
+    /**
+     * - Override for the UserOperation's max fee per gas (EIP-1559 cap).
+     */
+    maxFeePerGas?: bigint;
+    /**
+     * - Override for the UserOperation's max priority fee per gas.
+     */
+    maxPriorityFeePerGas?: bigint;
+    /**
+     * - Full 256-bit UserOperation nonce (`key << 64 | sequence`) placing the op in a specific lane. Omitted for default (key-0) sends, in which case AbstractionKit fetches the current on-chain nonce.
+     */
+    nonce?: bigint;
+};
 export type BuiltUserOperation = {
     /**
      * - The fully-populated UserOperation ready to sign.
@@ -378,6 +410,14 @@ export type EvmErc4337WalletCommonConfig = {
      * - Optional on-chain identifier. Appends a 50-byte project marker to every UserOperation callData. Pass a string to reuse it as the project name, or a full object for more control.
      */
     onChainIdentifier?: OnChainIdentifier | string;
+    /**
+     * - When true, each send is placed in a fresh, independent nonce lane (a random 192-bit key at sequence 0) so concurrent or back-to-back sends don't collide on the nonce. Ordering between such sends is not guaranteed and each consumes a new EntryPoint nonce slot. Ignored when `nonceKey` is set. Overridable per call.
+     */
+    parallel?: boolean;
+    /**
+     * - Send in an explicit nonce lane. A string is hashed to a deterministic key — a reusable named lane that resumes the same sequence across sessions; a bigint is used as the raw uint192 key and must be within the uint192 range (0 to 2^192 - 1), otherwise the send throws. Sends sharing a key are ordered sequentially; different keys run in parallel. Overridable per call.
+     */
+    nonceKey?: bigint | string;
 };
 export type EvmErc4337WalletPaymasterTokenConfig = {
     /**
