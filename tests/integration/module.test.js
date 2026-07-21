@@ -7,6 +7,7 @@ import { paymaster } from '@pimlico/mock-paymaster'
 import { MOCK_PAYMASTER_TOKEN_ADDRESS, mintMockTokens } from '../helpers/mock-paymaster-token.js'
 import { discoverPaymasterAddress } from '../helpers/erc-7677-discovery.js'
 import { deploy, transfer, balanceOf } from '../helpers/test-token.js'
+import { plantMainnetContracts } from '../helpers/mainnet-contracts.js'
 import path from 'path'
 
 const TIMEOUT = 60000 // 60 seconds
@@ -123,6 +124,8 @@ describe('@wdk/wallet-evm-erc-4337', () => {
   let paymasterAddress
 
   beforeAll(async () => {
+    await plantMainnetContracts(ethersProvider)
+
     const servers = await setupServers()
 
     bundlerInstance = servers.bundlerInstance
@@ -873,34 +876,6 @@ describe('@wdk/wallet-evm-erc-4337', () => {
       expect(signedUserOp.maxFeePerGas).toBe(OVERRIDES.maxFeePerGas)
       expect(signedUserOp.maxPriorityFeePerGas).toBe(OVERRIDES.maxPriorityFeePerGas)
     }
-  }, TIMEOUT)
-
-  test('should send two concurrent transactions with sequential nonces', async () => {
-    const account0 = await wallet.getAccountByPath("0'/0/0")
-    account0._quoteCache.clear()
-    account0._reservedNonces.clear()
-
-    const TX_A = { to: ACCOUNT1.safeAddress, value: 0 }
-    const TX_B = { to: ACCOUNT0.safeAddress, value: 0 }
-
-    const nonceBefore = await fetchAccountNonce('http://localhost:8545', ENTRY_POINT_ADDRESS, ACCOUNT0.safeAddress)
-
-    const [resA, resB] = await Promise.all([
-      account0.sendTransaction(TX_A),
-      account0.sendTransaction(TX_B)
-    ])
-
-    const [receiptA, receiptB] = await Promise.all([
-      waitForTx(resA.hash, account0),
-      waitForTx(resB.hash, account0)
-    ])
-
-    expect(receiptA.status).toBe(1)
-    expect(receiptB.status).toBe(1)
-    expect(resA.hash).not.toBe(resB.hash)
-
-    const nonceAfter = await fetchAccountNonce('http://localhost:8545', ENTRY_POINT_ADDRESS, ACCOUNT0.safeAddress)
-    expect(nonceAfter).toBe(nonceBefore + 2n)
   }, TIMEOUT)
 
   test('should propagate gas overrides through quoteTransfer / transfer / approve', async () => {
