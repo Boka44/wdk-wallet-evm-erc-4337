@@ -84,33 +84,27 @@ export const FEE_TOLERANCE_COEFFICIENT = 120n
  */
 
 /**
- * Gas-related UserOperationV7 overrides, coerced to `bigint`.
- *
- * Produced by `_extractGasOverrides` from an `EvmErc4337Transaction` and threaded into
- * `_buildUserOperation`. All fields are optional; absent fields fall back to the bundler-fetched
- * gas price (fee pair) or AbstractionKit's gas estimation (gas limits).
+ * Gas-related UserOperationV7 overrides. Numeric fields accept `number` or `bigint`; numbers are
+ * coerced to `bigint` by `_extractGasOverrides` before the operation is built. All fields are
+ * optional; absent fields fall back to the bundler-fetched gas price (fee pair) or the bundler's
+ * gas estimation (gas limits).
  *
  * @typedef {Object} EvmErc4337GasOverrides
- * @property {bigint} [callGasLimit] - Override for the UserOperation's call gas limit.
- * @property {bigint} [verificationGasLimit] - Override for the UserOperation's verification gas limit.
- * @property {bigint} [preVerificationGas] - Override for the UserOperation's pre-verification gas.
- * @property {bigint} [maxFeePerGas] - Override for the UserOperation's max fee per gas (EIP-1559 cap).
- * @property {bigint} [maxPriorityFeePerGas] - Override for the UserOperation's max priority fee per gas.
+ * @property {number | bigint} [callGasLimit] - Override for the UserOperation's call gas limit.
+ * @property {number | bigint} [verificationGasLimit] - Override for the UserOperation's verification gas limit.
+ * @property {number | bigint} [preVerificationGas] - Override for the UserOperation's pre-verification gas.
+ * @property {number | bigint} [maxFeePerGas] - Override for the UserOperation's max fee per gas (EIP-1559 cap).
+ * @property {number | bigint} [maxPriorityFeePerGas] - Override for the UserOperation's max priority fee per gas.
  */
 
 /**
- * Build-time UserOperationV7 overrides passed to `_buildUserOperation`: the gas overrides plus an
- * optional explicit `nonce` used to place the operation in a specific two-dimensional nonce lane.
- * The `nonce` is derived internally from the account's `parallel`/`nonceKey` configuration, never
- * from user-supplied transaction fields.
+ * A single explicit UserOperationV7 `nonce`, combined with `EvmErc4337GasOverrides` for the build
+ * step to place the operation in a specific two-dimensional nonce lane. The `nonce` is derived
+ * internally from the account's `parallel`/`nonceKey` configuration, never from user-supplied
+ * transaction fields.
  *
- * @typedef {Object} EvmErc4337BuildOverrides
- * @property {bigint} [callGasLimit] - Override for the UserOperation's call gas limit.
- * @property {bigint} [verificationGasLimit] - Override for the UserOperation's verification gas limit.
- * @property {bigint} [preVerificationGas] - Override for the UserOperation's pre-verification gas.
- * @property {bigint} [maxFeePerGas] - Override for the UserOperation's max fee per gas (EIP-1559 cap).
- * @property {bigint} [maxPriorityFeePerGas] - Override for the UserOperation's max priority fee per gas.
- * @property {bigint} [nonce] - Full 256-bit UserOperation nonce (`key << 64 | sequence`) placing the op in a specific lane. Omitted for default (key-0) sends, in which case AbstractionKit fetches the current on-chain nonce.
+ * @typedef {Object} Nonce
+ * @property {bigint} [nonce] - Full 256-bit UserOperation nonce (`key << 64 | sequence`) placing the op in a specific lane. Omitted for default (key-0) sends, in which case the account fetches the current on-chain nonce.
  */
 
 /**
@@ -130,7 +124,7 @@ export const FEE_TOLERANCE_COEFFICIENT = 120n
  * @property {string} safeModulesVersion - Version of the Safe 4337 module set to deploy with the account (e.g. "0.3.0"). Determines the module addresses used in init code.
  * @property {OnChainIdentifier | string} [onChainIdentifier] - Optional on-chain identifier. Appends a 50-byte project marker to every UserOperation callData. Pass a string to reuse it as the project name, or a full object for more control.
  * @property {boolean} [parallel] - When true, each send is placed in a fresh, independent nonce lane (a random 192-bit key at sequence 0) so concurrent or back-to-back sends don't collide on the nonce. Ordering between such sends is not guaranteed and each consumes a new EntryPoint nonce slot. Ignored when `nonceKey` is set. Overridable per call.
- * @property {bigint | string} [nonceKey] - Send in an explicit nonce lane. A string is hashed to a deterministic key — a reusable named lane that resumes the same sequence across sessions; a bigint is used as the raw uint192 key and must be within the uint192 range (0 to 2^192 - 1), otherwise the send throws. Sends sharing a key are ordered sequentially; different keys run in parallel. Overridable per call.
+ * @property {number | bigint | string} [nonceKey] - Send in an explicit nonce lane. A string is hashed to a deterministic key — a reusable named lane that resumes the same sequence across sessions; a number or bigint is used as the raw uint192 key and must be within the uint192 range (0 to 2^192 - 1), otherwise the send throws (pass a bigint or string for keys above 2^53). Sends sharing a key are ordered sequentially; different keys run in parallel. Overridable per call.
  */
 
 /**
@@ -637,7 +631,7 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
    * @protected
    * @param {MetaTransaction[]} calls - The meta-transactions to include in the UserOperation.
    * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee' | 'transactionMaxFee'>} config - The wallet configuration.
-   * @param {EvmErc4337BuildOverrides} [txOverrides] - Optional UserOperationV7 gas overrides extracted from the input transaction(s), plus an optional explicit lane `nonce`.
+   * @param {EvmErc4337GasOverrides & Nonce} [txOverrides] - Optional UserOperationV7 gas overrides extracted from the input transaction(s), plus an optional explicit lane `nonce`.
    * @returns {Promise<BuiltUserOperation>} The built operation, signing context, and (in token mode) the paymaster quote.
    */
   async _buildUserOperation (calls, config, txOverrides = {}) {

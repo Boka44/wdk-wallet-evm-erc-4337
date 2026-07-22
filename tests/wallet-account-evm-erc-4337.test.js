@@ -452,6 +452,14 @@ describe('@tetherto/wdk-wallet-evm-erc-4337', () => {
         expect(createUserOperationMock.mock.calls[0][3].nonce).toBe(FULL_NONCE)
       })
 
+      test('should accept a number nonceKey as a small raw key', async () => {
+        const address = await account.getAddress()
+
+        await account.sendTransaction(TX, { nonceKey: 7 })
+
+        expect(fetchAccountNonceMock).toHaveBeenCalledWith(expect.anything(), actualAk.ENTRYPOINT_V7, address, 7n)
+      })
+
       test('should derive a deterministic lane key from a string nonceKey', async () => {
         const LABEL = 'payments'
         const EXPECTED_KEY = BigInt(keccak256(toUtf8Bytes(LABEL))) & MAX_UINT192
