@@ -743,7 +743,12 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
     return null
   }
 
-  /** @private */
+  /**
+   * @private
+   * @throws {ConfigurationError} If, in token mode, the configured `paymasterAddress` does not match the
+   *   paymaster address returned by the paymaster RPC. This guards against the auto-generated ERC-20
+   *   approval targeting an unexpected paymaster contract.
+   */
   async _applyPaymasterToUserOp ({ mode, smartAccount, userOp, config, chainId, txOverrides = {} }) {
     const erc7677 = this._getPaymaster(config.paymasterUrl, { chainId: BigInt(chainId) })
 
@@ -764,6 +769,16 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
       paymasterOverrides
     )
 
-    return { userOp: result.userOperation, tokenQuote: result.tokenQuote }
+    const sponsoredOp = result.userOperation
+
+    if (mode === PaymasterMode.TOKEN && config.paymasterAddress && sponsoredOp.paymaster &&
+      sponsoredOp.paymaster.toLowerCase() !== config.paymasterAddress.toLowerCase()) {
+      throw new ConfigurationError(
+        `paymasterAddress mismatch: configured ${config.paymasterAddress} but RPC ${config.paymasterUrl} returned ${sponsoredOp.paymaster}. ` +
+        'The generated ERC-20 approval would target an unexpected paymaster.'
+      )
+    }
+
+    return { userOp: sponsoredOp, tokenQuote: result.tokenQuote }
   }
 }
