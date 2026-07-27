@@ -322,7 +322,7 @@ export type Nonce = {
     /**
      * - Full 256-bit UserOperation nonce (`key << 64 | sequence`) placing the op in a specific lane. Omitted for default (key-0) sends, in which case the account fetches the current on-chain nonce.
      */
-    nonce?: bigint;
+    nonce?: number | bigint;
 };
 export type BuiltUserOperation = {
     /**

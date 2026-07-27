@@ -104,7 +104,7 @@ export const FEE_TOLERANCE_COEFFICIENT = 120n
  * transaction fields.
  *
  * @typedef {Object} Nonce
- * @property {bigint} [nonce] - Full 256-bit UserOperation nonce (`key << 64 | sequence`) placing the op in a specific lane. Omitted for default (key-0) sends, in which case the account fetches the current on-chain nonce.
+ * @property {number | bigint} [nonce] - Full 256-bit UserOperation nonce (`key << 64 | sequence`) placing the op in a specific lane. Omitted for default (key-0) sends, in which case the account fetches the current on-chain nonce.
  */
 
 /**
