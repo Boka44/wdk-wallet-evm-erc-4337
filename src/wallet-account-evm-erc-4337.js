@@ -161,16 +161,16 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
       this._validateConfig(mergedConfig)
     }
 
-    const cached = await this._resolveQuote(tx, config)
+    const prepared = await this._prepareForSend(tx, [tx], mergedConfig)
 
-    const fee = cached.fee
+    const fee = prepared.fee
 
     const { isSponsored, transactionMaxFee } = mergedConfig
     if (!isSponsored && transactionMaxFee !== undefined && fee > transactionMaxFee) {
       throw new Error('Exceeded maximum fee cost for transaction operation.')
     }
 
-    const { userOp } = await this._signUserOperation([tx], { config: mergedConfig, cachedBuild: cached })
+    const { userOp } = await this._signUserOperation([tx], { config: mergedConfig, cachedBuild: prepared })
 
     this._quoteCache.clear()
 
@@ -364,23 +364,6 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
    */
   dispose () {
     this._ownerAccount.dispose()
-  }
-
-  /** @private */
-  async _resolveQuote (tx, config) {
-    let cached = this._consumeCachedQuote(tx)
-
-    if (cached?.userOp) {
-      const onChainNonce = await fetchAccountNonce(this._provider, cached.smartAccount.entrypointAddress, cached.smartAccount.accountAddress)
-      if (cached.userOp.nonce !== onChainNonce) cached = undefined
-    }
-
-    if (!cached) {
-      await this.quoteSendTransaction(tx, config)
-      cached = this._consumeCachedQuote(tx)
-    }
-
-    return cached
   }
 
   /** @private */
