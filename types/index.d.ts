@@ -8,6 +8,7 @@ export type FeeRates = import("@tetherto/wdk-wallet-evm").FeeRates;
 export type KeyPair = import("@tetherto/wdk-wallet-evm").KeyPair;
 export type EvmErc4337Transaction = import("./src/wallet-account-read-only-evm-erc-4337.js").EvmErc4337Transaction;
 export type EvmErc4337GasOverrides = import("./src/wallet-account-read-only-evm-erc-4337.js").EvmErc4337GasOverrides;
+export type Nonce = import("./src/wallet-account-read-only-evm-erc-4337.js").Nonce;
 export type TransactionResult = import("@tetherto/wdk-wallet-evm").TransactionResult;
 export type TransferOptions = import("@tetherto/wdk-wallet-evm").TransferOptions;
 export type TransferResult = import("@tetherto/wdk-wallet-evm").TransferResult;

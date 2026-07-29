@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, jest, test } from '@jest/globals'
 import * as bip39 from 'bip39'
-import { Contract } from 'ethers'
+import { Contract, keccak256, toUtf8Bytes } from 'ethers'
 
 const actualWalletEvm = await import('@tetherto/wdk-wallet-evm')
 const actualAk = await import('abstractionkit')
@@ -368,36 +368,7 @@ describe('@tetherto/wdk-wallet-evm-erc-4337', () => {
           ],
           EIP1193_PROVIDER,
           undefined,
-          { skipGasEstimation: true, nonce: 0n }
-        )
-      })
-
-      test('should allocate sequential nonces to concurrent transactions', async () => {
-        fetchAccountNonceMock.mockResolvedValue(5n)
-        signUserOperationWithSignersMock.mockResolvedValue(DUMMY_OP_SIGNATURE)
-        sendUserOperationMock.mockResolvedValue(DUMMY_USER_OP_HASH)
-
-        const [resultA, resultB] = await Promise.all([
-          account.sendTransaction(TRANSACTION),
-          account.sendTransaction({ to: RECIPIENT, value: 2, data: '0x' })
-        ])
-
-        expect(resultA.hash).toBe(DUMMY_USER_OP_HASH)
-        expect(resultA.fee).toBe(0n)
-        expect(resultB.hash).toBe(DUMMY_USER_OP_HASH)
-        expect(resultB.fee).toBe(0n)
-        expect(createUserOperationMock).toHaveBeenCalledTimes(2)
-        expect(createUserOperationMock).toHaveBeenCalledWith(
-          [{ to: ACCOUNT.address, value: 1n, data: '0x' }],
-          EIP1193_PROVIDER,
-          undefined,
-          { skipGasEstimation: true, nonce: 5n }
-        )
-        expect(createUserOperationMock).toHaveBeenCalledWith(
-          [{ to: RECIPIENT, value: 2n, data: '0x' }],
-          EIP1193_PROVIDER,
-          undefined,
-          { skipGasEstimation: true, nonce: 6n }
+          { skipGasEstimation: true }
         )
       })
 
@@ -416,7 +387,7 @@ describe('@tetherto/wdk-wallet-evm-erc-4337', () => {
           ],
           EIP1193_PROVIDER,
           undefined,
-          { skipGasEstimation: true, callGasLimit: 111_111n, nonce: 0n }
+          { skipGasEstimation: true, callGasLimit: 111_111n }
         )
       })
 
@@ -432,6 +403,82 @@ describe('@tetherto/wdk-wallet-evm-erc-4337', () => {
 
         await expect(account.sendTransaction(TRANSACTION))
           .rejects.toThrow('Not enough funds on the safe account to repay the paymaster.')
+      })
+    })
+
+    describe('nonce lanes', () => {
+      const TX = { to: ACCOUNT.address, value: 1, data: '0x' }
+      const MAX_UINT192 = (1n << 192n) - 1n
+      const MAX_UINT64 = (1n << 64n) - 1n
+
+      beforeEach(() => {
+        signUserOperationWithSignersMock.mockResolvedValue(DUMMY_OP_SIGNATURE)
+        sendUserOperationMock.mockResolvedValue(DUMMY_USER_OP_HASH)
+      })
+
+      test('should not set a nonce override on a normal send (default key-0 path)', async () => {
+        await account.sendTransaction(TX)
+
+        expect(createUserOperationMock.mock.calls[0][3].nonce).toBeUndefined()
+        expect(fetchAccountNonceMock).not.toHaveBeenCalled()
+      })
+
+      test('should place a parallel send in a fresh lane (non-zero key, sequence 0) without an on-chain nonce read', async () => {
+        await account.sendTransaction(TX, { parallel: true })
+
+        const nonce = createUserOperationMock.mock.calls[0][3].nonce
+        expect(nonce >> 64n).not.toBe(0n)
+        expect(nonce & MAX_UINT64).toBe(0n)
+        expect(fetchAccountNonceMock).not.toHaveBeenCalled()
+      })
+
+      test('should give each parallel send its own distinct lane', async () => {
+        await Promise.all([account.sendTransaction(TX, { parallel: true }), account.sendTransaction(TX, { parallel: true })])
+
+        const keyA = createUserOperationMock.mock.calls[0][3].nonce >> 64n
+        const keyB = createUserOperationMock.mock.calls[1][3].nonce >> 64n
+        expect(keyA).not.toBe(keyB)
+      })
+
+      test('should use a raw bigint nonceKey verbatim, at its current sequence', async () => {
+        const KEY = 42n
+        const FULL_NONCE = (KEY << 64n) | 3n
+        fetchAccountNonceMock.mockResolvedValue(FULL_NONCE)
+        const address = await account.getAddress()
+
+        await account.sendTransaction(TX, { nonceKey: KEY })
+
+        expect(fetchAccountNonceMock).toHaveBeenCalledWith(expect.anything(), actualAk.ENTRYPOINT_V7, address, KEY)
+        expect(createUserOperationMock.mock.calls[0][3].nonce).toBe(FULL_NONCE)
+      })
+
+      test('should accept a number nonceKey as a small raw key', async () => {
+        const address = await account.getAddress()
+
+        await account.sendTransaction(TX, { nonceKey: 7 })
+
+        expect(fetchAccountNonceMock).toHaveBeenCalledWith(expect.anything(), actualAk.ENTRYPOINT_V7, address, 7n)
+      })
+
+      test('should derive a deterministic lane key from a string nonceKey', async () => {
+        const LABEL = 'payments'
+        const EXPECTED_KEY = BigInt(keccak256(toUtf8Bytes(LABEL))) & MAX_UINT192
+        const address = await account.getAddress()
+
+        await account.sendTransaction(TX, { nonceKey: LABEL })
+
+        expect(fetchAccountNonceMock).toHaveBeenCalledWith(expect.anything(), actualAk.ENTRYPOINT_V7, address, EXPECTED_KEY)
+      })
+
+      test('should reject a bigint nonceKey above the uint192 range', async () => {
+        await expect(account.sendTransaction(TX, { nonceKey: MAX_UINT192 + 1n }))
+          .rejects.toThrow('nonceKey must be within the uint192 range (0 to 2^192 - 1).')
+        expect(fetchAccountNonceMock).not.toHaveBeenCalled()
+      })
+
+      test('should reject a negative bigint nonceKey', async () => {
+        await expect(account.sendTransaction(TX, { nonceKey: -1n }))
+          .rejects.toThrow('nonceKey must be within the uint192 range (0 to 2^192 - 1).')
       })
     })
 
@@ -496,7 +543,7 @@ describe('@tetherto/wdk-wallet-evm-erc-4337', () => {
           [{ to: USDT_MAINNET_ADDRESS, value: 0n, data: expectedData }],
           EIP1193_PROVIDER,
           undefined,
-          { skipGasEstimation: true, nonce: 0n }
+          { skipGasEstimation: true }
         )
       })
 
@@ -569,7 +616,7 @@ describe('@tetherto/wdk-wallet-evm-erc-4337', () => {
           [{ to: USDT_MAINNET_ADDRESS, value: 0n, data: expectedData }],
           EIP1193_PROVIDER,
           undefined,
-          { skipGasEstimation: true, nonce: 0n }
+          { skipGasEstimation: true }
         )
       })
 
@@ -589,7 +636,7 @@ describe('@tetherto/wdk-wallet-evm-erc-4337', () => {
           [{ to: USDT_MAINNET_ADDRESS, value: 0n, data: expectedData }],
           EIP1193_PROVIDER,
           undefined,
-          { skipGasEstimation: true, nonce: 0n }
+          { skipGasEstimation: true }
         )
       })
 
@@ -611,7 +658,7 @@ describe('@tetherto/wdk-wallet-evm-erc-4337', () => {
           [{ to: USDC_MAINNET_ADDRESS, value: 0n, data: expectedData }],
           EIP1193_PROVIDER,
           undefined,
-          { skipGasEstimation: true, nonce: 0n }
+          { skipGasEstimation: true }
         )
       })
 

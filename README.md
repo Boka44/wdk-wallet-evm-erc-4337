@@ -53,7 +53,34 @@ wallet.dispose()
 - **ERC-20 Token Support**: Query balances and transfer tokens via UserOperations
 - **Message Signing**: Sign and verify messages with the underlying EOA key
 - **Per-Call Config Overrides**: Switch gas payment modes on a per-transaction basis
+- **Parallel Nonce Lanes**: Send independent operations concurrently via ERC-4337 two-dimensional nonces (`parallel: true` or a reusable `nonceKey`)
 - **Secure Memory Disposal**: Clear private keys from memory when done
+
+## Concurrent / Parallel Sends (nonce lanes)
+
+By default every send uses the account's key-0 nonce, so it is sequential — a second send fired before the first is mined would collide on the nonce. To send independent operations concurrently, put each in its own **nonce lane** (an ERC-4337 two-dimensional nonce: a 192-bit `key` with its own sequence). Ops in different keys have no ordering constraint and validate independently, so they can be submitted at the same time.
+
+```javascript
+// parallel: true → each send gets a fresh random lane (sequence 0). Fire them together:
+const [a, b] = await Promise.all([
+  account.sendTransaction({ to: '0x...', value: 0n }, { parallel: true }),
+  account.sendTransaction({ to: '0x...', value: 0n }, { parallel: true })
+])
+
+// nonceKey: a string is a reusable named lane (same label resumes the same lane across sessions);
+// a bigint is used as the raw uint192 key. Same key = ordered; different keys = parallel.
+await account.sendTransaction(tx, { nonceKey: 'payments' })
+await account.sendTransaction(tx, { nonceKey: 1n })
+```
+
+Both options can also be set at construction (`new WalletManagerEvmErc4337(seed, { ..., parallel: true })`) and overridden per call. Precedence: `nonceKey` > `parallel` > default (key 0).
+
+**Notes:**
+- **Deploy the account first.** A Safe smart account is deployed by its first UserOperation (which carries the init code). Concurrent sends from an **undeployed** account can't each carry the init code, so let one send land (deploying the account) before firing parallel lanes.
+- **Requires a bundler that accepts parallel keys** (Pimlico and Candide both do). There is no SDK-side lane limit; respect your bundler's cap (e.g. Pimlico allows up to 100 parallel).
+- **Per-sender mempool cap (≈4).** Per [ERC-7562](https://eips.ethereum.org/EIPS/eip-7562), a standard bundler mempool holds at most **4** in-flight UserOperations from a single sender at once (`SAME_SENDER_MEMPOOL_COUNT = 4`). Firing more than 4 lanes concurrently may be rejected until earlier ops mine. This is a mempool validation limit, separate from parallel-key support, and can be raised by the bundler operator if needed.
+- `parallel: true` mints a **new** EntryPoint nonce slot per send (a one-time gas cost per lane; permanent state). For repeated parallel workloads, reuse a fixed set of lanes with `nonceKey` labels instead of a fresh key every time.
+- A single lane is still **sequential**. Two concurrent sends sharing the same `nonceKey` collide on the sequence: the second is typically still **accepted by the bundler and returns a hash, yet can never mine** — its hash never resolves to a receipt and no error is thrown (a silent phantom hash). To run operations concurrently, give each its **own lane** (`parallel: true`, or distinct `nonceKey`s). If operations must share a lane, either **await each send's receipt before firing the next**, or **batch them into a single UserOperation** by passing an array to `sendTransaction([tx1, tx2, ...])` — batched calls execute atomically, in order, under one nonce.
 
 ## Compatibility
 
