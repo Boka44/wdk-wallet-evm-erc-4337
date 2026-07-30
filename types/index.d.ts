@@ -4,6 +4,7 @@ export { default as WalletAccountEvmErc4337 } from "./src/wallet-account-evm-erc
 export { ConfigurationError } from "./src/errors.js";
 export type UserOperationReceipt = import("./src/wallet-account-read-only-evm-erc-4337.js").UserOperationReceipt;
 export type BuiltUserOperation = import("./src/wallet-account-read-only-evm-erc-4337.js").BuiltUserOperation;
+export type EvmErc4337TransactionInfo = import("./src/wallet-account-read-only-evm-erc-4337.js").EvmErc4337TransactionInfo;
 export type FeeRates = import("@tetherto/wdk-wallet-evm").FeeRates;
 export type KeyPair = import("@tetherto/wdk-wallet-evm").KeyPair;
 export type EvmErc4337Transaction = import("./src/wallet-account-read-only-evm-erc-4337.js").EvmErc4337Transaction;

@@ -120,10 +120,22 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
     /**
      * Returns a transaction's receipt.
      *
+     * @deprecated Use {@link getTransaction} instead, which returns a normalized, finality-based receipt. The raw ethers receipt and the user operation receipt remain available on its `receipt` and `userOperationReceipt` properties.
      * @param {string} hash - The user operation hash.
      * @returns {Promise<EvmTransactionReceipt | null>} – The receipt, or null if the transaction has not been included in a block yet.
      */
     getTransactionReceipt(hash: string): Promise<EvmTransactionReceipt | null>;
+    /**
+     * Returns a normalized, finality-based receipt for a user operation. Finality and confirmations come from the bundling transaction; `success` and `fee` come from the user operation.
+     *
+     * @param {string} hash - The user operation hash.
+     * @returns {Promise<EvmErc4337TransactionInfo | null>} The normalized receipt, or null if the user operation is not known.
+     */
+    getTransaction(hash: string): Promise<EvmErc4337TransactionInfo | null>;
+    /** @protected @type {number} */
+    protected get _defaultWaitInterval(): number;
+    /** @protected @type {number} */
+    protected get _defaultWaitTimeout(): number;
     /**
      * Returns a user operation's receipt.
      *
@@ -250,6 +262,16 @@ export type TransferResult = import("@tetherto/wdk-wallet-evm").TransferResult;
 export type EvmTransactionReceipt = import("@tetherto/wdk-wallet-evm").EvmTransactionReceipt;
 export type TypedData = import("@tetherto/wdk-wallet-evm").TypedData;
 export type UserOperationReceipt = import('abstractionkit').UserOperationReceiptResult;
+export type TransactionReceipt = import("@tetherto/wdk-wallet").TransactionReceipt;
+/**
+ * A normalized ERC-4337 transaction receipt, extended with the confirmation depth, the native ethers transaction and receipt, and the user operation receipt.
+ */
+export type EvmErc4337TransactionInfo = TransactionReceipt & {
+    confirmations: number;
+    transaction: import("ethers").TransactionResponse | null;
+    receipt: EvmTransactionReceipt | null;
+    userOperationReceipt: UserOperationReceipt;
+};
 export type EvmErc4337Transaction = {
     /**
      * - The call's recipient.

@@ -16,6 +16,7 @@
 
 /** @typedef {import('./src/wallet-account-read-only-evm-erc-4337.js').UserOperationReceipt} UserOperationReceipt */
 /** @typedef {import('./src/wallet-account-read-only-evm-erc-4337.js').BuiltUserOperation} BuiltUserOperation */
+/** @typedef {import('./src/wallet-account-read-only-evm-erc-4337.js').EvmErc4337TransactionInfo} EvmErc4337TransactionInfo */
 
 /** @typedef {import('@tetherto/wdk-wallet-evm').FeeRates} FeeRates */
 
