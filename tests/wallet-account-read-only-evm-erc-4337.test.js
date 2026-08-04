@@ -411,6 +411,33 @@ describe('@tetherto/wdk-wallet-evm-erc-4337', () => {
         await expect(pmAccount.quoteSendTransaction(TRANSACTION))
           .rejects.toThrow('boom')
       })
+
+      test('should throw when the paymaster RPC returns a different paymaster address than configured', async () => {
+        const WRONG_PAYMASTER = '0x1111111111111111111111111111111111111111'
+
+        createPaymasterUserOperationMock.mockResolvedValue({
+          userOperation: { ...DUMMY_USER_OP, paymaster: WRONG_PAYMASTER },
+          tokenQuote: { tokenCost: 500_000n }
+        })
+
+        const pmAccount = new WalletAccountReadOnlyEvmErc4337(OWNER_ADDRESS, PAYMASTER_TOKEN_CONFIG)
+
+        await expect(pmAccount.quoteSendTransaction(TRANSACTION))
+          .rejects.toThrow(/paymasterAddress mismatch.*0x1111111111111111111111111111111111111111/)
+      })
+
+      test('should pass through when the paymaster RPC returns the configured paymaster address (case-insensitive)', async () => {
+        createPaymasterUserOperationMock.mockResolvedValue({
+          userOperation: { ...DUMMY_USER_OP, paymaster: PAYMASTER_TOKEN_CONFIG.paymasterAddress.toLowerCase() },
+          tokenQuote: { tokenCost: 500_000n }
+        })
+
+        const pmAccount = new WalletAccountReadOnlyEvmErc4337(OWNER_ADDRESS, PAYMASTER_TOKEN_CONFIG)
+
+        const { fee } = await pmAccount.quoteSendTransaction(TRANSACTION)
+
+        expect(fee).toBe(600_000n)
+      })
     })
 
     describe('quoteTransfer', () => {
