@@ -408,7 +408,6 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
       return {
         id: hash,
         finality: 'pending',
-        success: null,
         confirmations: 0,
         transaction: null,
         receipt: null,
