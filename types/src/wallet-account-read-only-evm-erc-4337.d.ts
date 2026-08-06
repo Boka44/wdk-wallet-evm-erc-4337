@@ -134,9 +134,7 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
      */
     getTransaction(hash: string): Promise<EvmErc4337TransactionInfo>;
     /** @protected @type {number} */
-    protected get _defaultWaitInterval(): number;
-    /** @protected @type {number} */
-    protected get _defaultWaitTimeout(): number;
+    protected static _DEFAULT_WAIT_TIMEOUT: number;
     /**
      * Returns a user operation's receipt.
      *
