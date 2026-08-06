@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, jest, test } from '@jest/globals'
 import { Contract } from 'ethers'
+import { NoSuchElementError } from '@tetherto/wdk-wallet'
 
 const actualWalletEvm = await import('@tetherto/wdk-wallet-evm')
 const actualAk = await import('abstractionkit')
@@ -543,23 +544,19 @@ describe('@tetherto/wdk-wallet-evm-erc-4337', () => {
         expect(evmGetTransactionMock).not.toHaveBeenCalled()
       })
 
-      test('returns null when the bundler has never seen the user operation', async () => {
+      test('throws NoSuchElementError when the bundler has never seen the user operation', async () => {
         getUserOperationByHashMock.mockResolvedValue(null)
 
-        const info = await account.getTransaction(DUMMY_USER_OP_HASH)
-
-        expect(info).toBeNull()
+        await expect(account.getTransaction(DUMMY_USER_OP_HASH)).rejects.toThrow(NoSuchElementError)
         expect(evmGetTransactionMock).not.toHaveBeenCalled()
       })
 
-      test('returns null when the bundling tx can no longer be found', async () => {
+      test('throws NoSuchElementError when the bundling tx can no longer be found', async () => {
         getUserOperationByHashMock.mockResolvedValue({ transactionHash: DUMMY_TX_HASH })
         getUserOperationReceiptMock.mockResolvedValue(DUMMY_USER_OP_RECEIPT)
         evmGetTransactionMock.mockResolvedValue(null)
 
-        const info = await account.getTransaction(DUMMY_USER_OP_HASH)
-
-        expect(info).toBeNull()
+        await expect(account.getTransaction(DUMMY_USER_OP_HASH)).rejects.toThrow(NoSuchElementError)
       })
     })
 
