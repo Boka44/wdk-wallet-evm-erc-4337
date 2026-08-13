@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, jest, test } from '@jest/globals'
 import { Contract } from 'ethers'
-import { NoSuchElementError } from '@tetherto/wdk-wallet'
+import { NoSuchElementError, ValueError } from '@tetherto/wdk-wallet'
 
 const actualWalletEvm = await import('@tetherto/wdk-wallet-evm')
 const actualAk = await import('abstractionkit')
@@ -113,7 +113,6 @@ const DUMMY_EVM_TX_INFO = {
   block: '0x' + '22'.repeat(32),
   fee: 21_000n * 2_000_000_000n,
   confirmations: 3,
-  transaction: { hash: DUMMY_TX_HASH },
   receipt: DUMMY_TX_RECEIPT
 }
 
@@ -490,6 +489,11 @@ describe('@tetherto/wdk-wallet-evm-erc-4337', () => {
     })
 
     describe('getTransaction', () => {
+      test('throws ValueError when the hash is not a valid user operation hash', async () => {
+        await expect(account.getTransaction('0xnotahash')).rejects.toThrow(ValueError)
+        expect(getUserOperationByHashMock).not.toHaveBeenCalled()
+      })
+
       test('derives finality from the bundling tx and success/fee from the user operation', async () => {
         getUserOperationByHashMock.mockResolvedValue({ transactionHash: DUMMY_TX_HASH })
         getUserOperationReceiptMock.mockResolvedValue(DUMMY_USER_OP_RECEIPT)
@@ -502,7 +506,6 @@ describe('@tetherto/wdk-wallet-evm-erc-4337', () => {
         expect(info.confirmations).toBe(3)
         expect(info.success).toBe(true)
         expect(info.fee).toBe(DUMMY_USER_OP_RECEIPT.actualGasCost)
-        expect(info.transaction).toEqual(DUMMY_EVM_TX_INFO.transaction)
         expect(info.receipt).toEqual(DUMMY_TX_RECEIPT)
         expect(info.userOperationReceipt).toEqual(DUMMY_USER_OP_RECEIPT)
         expect(evmGetTransactionMock).toHaveBeenCalledWith(DUMMY_TX_HASH)
@@ -538,7 +541,6 @@ describe('@tetherto/wdk-wallet-evm-erc-4337', () => {
         expect(info.finality).toBe('pending')
         expect(info.success).toBeUndefined()
         expect(info.confirmations).toBe(0)
-        expect(info.transaction).toBeNull()
         expect(info.receipt).toBeNull()
         expect(info.userOperationReceipt).toBeNull()
         expect(evmGetTransactionMock).not.toHaveBeenCalled()
