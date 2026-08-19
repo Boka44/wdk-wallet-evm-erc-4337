@@ -120,10 +120,35 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
     /**
      * Returns a transaction's receipt.
      *
+     * @deprecated Use {@link getTransaction} instead, which returns a normalized, finality-based receipt. The raw ethers receipt and the user operation receipt remain available on its `receipt` and `userOperationReceipt` properties.
      * @param {string} hash - The user operation hash.
      * @returns {Promise<EvmTransactionReceipt | null>} – The receipt, or null if the transaction has not been included in a block yet.
      */
     getTransactionReceipt(hash: string): Promise<EvmTransactionReceipt | null>;
+    /**
+     * Returns a normalized, finality-based receipt for a user operation. Finality and confirmations come from the bundling transaction; `success` and `fee` come from the user operation.
+     *
+     * @param {string} hash - The user operation hash.
+     * @returns {Promise<TransactionReceipt & EvmErc4337TransactionDetails>} The normalized receipt.
+     * @throws {ValueError} If the hash is not a valid user operation hash.
+     * @throws {NoSuchElementError} If no user operation has been found for the given hash.
+     */
+    getTransaction(hash: string): Promise<TransactionReceipt & EvmErc4337TransactionDetails>;
+    /**
+     * Blocks until a user operation reaches a terminal state (the requested finality target or `dropped`), or times out.
+     *
+     * @param {string} hash - The user operation hash.
+     * @param {WaitForTransactionOptions} [options] - The wait options.
+     * @returns {Promise<TransactionReceipt & EvmErc4337TransactionDetails>} The terminal receipt: the finality target reached (inspect `success` to tell success from revert), or `dropped`.
+     * @throws {TimeoutError} If the target is not reached before the timeout.
+     */
+    waitForTransaction(hash: string, options?: WaitForTransactionOptions): Promise<TransactionReceipt & EvmErc4337TransactionDetails>;
+    /**
+     * Overrides the base default to allow for slower ERC-4337 bundling, inclusion, and confirmation.
+     *
+     * @type {number}
+     */
+    get defaultWaitTimeout(): number;
     /**
      * Returns a user operation's receipt.
      *
@@ -250,6 +275,25 @@ export type TransferResult = import("@tetherto/wdk-wallet-evm").TransferResult;
 export type EvmTransactionReceipt = import("@tetherto/wdk-wallet-evm").EvmTransactionReceipt;
 export type TypedData = import("@tetherto/wdk-wallet-evm").TypedData;
 export type UserOperationReceipt = import('abstractionkit').UserOperationReceiptResult;
+export type TransactionReceipt = import("@tetherto/wdk-wallet").TransactionReceipt;
+export type WaitForTransactionOptions = import("@tetherto/wdk-wallet").WaitForTransactionOptions;
+/**
+ * The ERC-4337-specific fields added to a normalized transaction receipt.
+ */
+export type EvmErc4337TransactionDetails = {
+    /**
+     * - The number of confirmations (0 while pending or dropped).
+     */
+    confirmations: number;
+    /**
+     * - The native ethers receipt, or null while the user operation is pending or dropped.
+     */
+    receipt: EvmTransactionReceipt | null;
+    /**
+     * - The user operation receipt, or null while pending or unavailable.
+     */
+    userOperationReceipt: UserOperationReceipt | null;
+};
 export type EvmErc4337Transaction = {
     /**
      * - The call's recipient.
