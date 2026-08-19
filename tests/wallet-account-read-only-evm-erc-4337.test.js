@@ -556,7 +556,7 @@ describe('@tetherto/wdk-wallet-evm-erc-4337', () => {
       test('throws NoSuchElementError when the bundling tx can no longer be found', async () => {
         getUserOperationByHashMock.mockResolvedValue({ transactionHash: DUMMY_TX_HASH })
         getUserOperationReceiptMock.mockResolvedValue(DUMMY_USER_OP_RECEIPT)
-        evmGetTransactionMock.mockResolvedValue(null)
+        evmGetTransactionMock.mockRejectedValue(new NoSuchElementError(`No transaction found for '${DUMMY_TX_HASH}'.`))
 
         await expect(account.getTransaction(DUMMY_USER_OP_HASH)).rejects.toThrow(NoSuchElementError)
       })
