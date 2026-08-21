@@ -16,6 +16,8 @@
 
 import { Contract, hexlify, keccak256, randomBytes, toUtf8Bytes } from 'ethers'
 
+import { MaximumFeeExceededError, ProviderRequiredError, TransactionError, TransactionErrorReason, ValueError } from '@tetherto/wdk-wallet'
+
 import { WalletAccountEvm } from '@tetherto/wdk-wallet-evm'
 
 import { AbstractionKitError, ENTRYPOINT_V7, calculateUserOperationMaxGasCost, fetchAccountNonce } from 'abstractionkit'
@@ -152,7 +154,7 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
    * @param {EvmErc4337Transaction} tx - The transaction to include in the user operation.
    * @param {Partial<EvmErc4337WalletPaymasterTokenConfig | EvmErc4337WalletSponsorshipPolicyConfig | EvmErc4337WalletNativeCoinsConfig>} [config] - If set, overrides the given configuration options.
    * @returns {Promise<UserOperationV7>} The signed user operation.
-   * @throws {Error} If the transaction is not sponsored, and the transaction's cost surpasses the transaction max. fee option.
+   * @throws {MaximumFeeExceededError} If the transaction is not sponsored, and the transaction's cost surpasses the transaction max. fee option.
    */
   async signTransaction (tx, config) {
     const mergedConfig = { ...this._config, ...config }
@@ -167,7 +169,7 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
 
     const { isSponsored, transactionMaxFee } = mergedConfig
     if (!isSponsored && transactionMaxFee !== undefined && fee > transactionMaxFee) {
-      throw new Error('Exceeded maximum fee cost for transaction operation.')
+      throw new MaximumFeeExceededError('Exceeded maximum fee cost for transaction operation.')
     }
 
     const { userOp } = await this._signUserOperation([tx], { config: mergedConfig, cachedBuild: prepared })
@@ -183,11 +185,12 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
    * @param {ApproveOptions} options - The approve options.
    * @param {EvmErc4337GasOverrides} [txOverrides] - If set, applies these UserOperationV7 gas/fee overrides to the underlying transaction.
    * @returns {Promise<TransactionResult>} - The transaction's result.
-   * @throws {Error} - If trying to approve usdts on ethereum with allowance not equal to zero (due to the usdt allowance reset requirement).
+   * @throws {ProviderRequiredError} - If the wallet is not connected to a provider.
+   * @throws {ValueError} - If trying to approve usdts on ethereum with allowance not equal to zero (due to the usdt allowance reset requirement).
    */
   async approve (options, txOverrides) {
     if (!this._ownerAccount._provider) {
-      throw new Error('The wallet must be connected to a provider to approve funds.')
+      throw new ProviderRequiredError('The wallet must be connected to a provider to approve funds.')
     }
 
     const { token, spender, amount } = options
@@ -196,7 +199,7 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
     if (chainId === 1n && token.toLowerCase() === USDT_MAINNET_ADDRESS.toLowerCase()) {
       const currentAllowance = await this.getAllowance(token, spender)
       if (currentAllowance > 0n && BigInt(amount) > 0n) {
-        throw new Error(
+        throw new ValueError(
           'USDT requires the current allowance to be reset to 0 before setting a new non-zero value. Please send an "approve" transaction with an amount of 0 first.'
         )
       }
@@ -281,8 +284,9 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
    * @param {EvmErc4337Transaction | EvmErc4337Transaction[] | UserOperationV7} tx -  The transaction, an array of multiple transactions to send in batch, or an already-signed UserOperation.
    * @param {Partial<EvmErc4337WalletPaymasterTokenConfig | EvmErc4337WalletSponsorshipPolicyConfig | EvmErc4337WalletNativeCoinsConfig>} [config] - If set, overrides the given configuration options.
    * @returns {Promise<TransactionResult>} The transaction's result.
-   * @throws {Error} If the transaction is not sponsored, and the transaction's cost surpasses the transaction max. fee option.
-   * @throws {Error} If `nonceKey` is a bigint outside the uint192 range (0 to 2^192 - 1).
+   * @throws {MaximumFeeExceededError} If the transaction is not sponsored, and the transaction's cost surpasses the transaction max. fee option.
+   * @throws {ValueError} If `nonceKey` is a bigint outside the uint192 range (0 to 2^192 - 1).
+   * @throws {TransactionError} If the paymaster reports AA50 (the account cannot repay the paymaster).
    */
   async sendTransaction (tx, config) {
     const mergedConfig = { ...this._config, ...config }
@@ -304,7 +308,7 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
 
     const { isSponsored, transactionMaxFee } = mergedConfig
     if (!isSponsored && transactionMaxFee !== undefined && prepared.fee > transactionMaxFee) {
-      throw new Error('Exceeded maximum fee cost for transaction operation.')
+      throw new MaximumFeeExceededError('Exceeded maximum fee cost for transaction operation.')
     }
 
     const hash = await this._sendUserOperation(txs, { config: mergedConfig, cachedBuild: prepared })
@@ -320,8 +324,9 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
    * @param {Partial<EvmErc4337WalletPaymasterTokenConfig | EvmErc4337WalletSponsorshipPolicyConfig | EvmErc4337WalletNativeCoinsConfig>} [config] - If set, overrides the given configuration options.
    * @param {EvmErc4337GasOverrides} [txOverrides] - If set, applies these UserOperationV7 gas/fee overrides to the underlying transaction.
    * @returns {Promise<TransferResult>} The transfer's result.
-   * @throws {Error} If the transaction is not sponsored, and the transfer's cost surpasses the transfer max. fee option.
-   * @throws {Error} If `nonceKey` is a bigint outside the uint192 range (0 to 2^192 - 1).
+   * @throws {MaximumFeeExceededError} If the transaction is not sponsored, and the transfer's cost surpasses the transfer max. fee option.
+   * @throws {ValueError} If `nonceKey` is a bigint outside the uint192 range (0 to 2^192 - 1).
+   * @throws {TransactionError} If the paymaster reports AA50 (the account cannot repay the paymaster).
    */
   async transfer (options, config, txOverrides) {
     const mergedConfig = { ...this._config, ...config }
@@ -339,7 +344,7 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
     const prepared = await this._prepareForSend(tx, txs, mergedConfig)
 
     if (!isSponsored && transferMaxFee !== undefined && prepared.fee >= transferMaxFee) {
-      throw new Error('Exceeded maximum fee cost for transfer operation.')
+      throw new MaximumFeeExceededError('Exceeded maximum fee cost for transfer operation.')
     }
 
     const hash = await this._sendUserOperation(txs, { config: mergedConfig, cachedBuild: prepared })
@@ -409,7 +414,7 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
       } else {
         key = BigInt(config.nonceKey)
         if (key < 0n || key > MAX_UINT192) {
-          throw new Error('nonceKey must be within the uint192 range (0 to 2^192 - 1).')
+          throw new ValueError('nonceKey must be within the uint192 range (0 to 2^192 - 1).')
         }
       }
       return await fetchAccountNonce(this._provider, ENTRYPOINT_V7, this._address, key)
@@ -476,7 +481,10 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
       return await this._getBundler().sendUserOperation(userOp, smartAccount.entrypointAddress)
     } catch (err) {
       if (err instanceof AbstractionKitError && err.message.includes('AA50')) {
-        throw new Error('Not enough funds on the safe account to repay the paymaster.')
+        throw new TransactionError('Not enough funds on the safe account to repay the paymaster.', {
+          reason: TransactionErrorReason.INSUFFICIENT_BALANCE,
+          cause: err
+        })
       }
       throw err
     }
@@ -488,13 +496,17 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
    * @private
    * @param {UserOperationV7} userOp - The signed UserOperation.
    * @returns {Promise<string>} The user operation hash.
+   * @throws {TransactionError} If the paymaster reports AA50 (the account cannot repay the paymaster).
    */
   async _broadcastSignedUserOperation (userOp) {
     try {
       return await this._getBundler().sendUserOperation(userOp, ENTRYPOINT_V7)
     } catch (err) {
       if (err instanceof AbstractionKitError && err.message.includes('AA50')) {
-        throw new Error('Not enough funds on the safe account to repay the paymaster.')
+        throw new TransactionError('Not enough funds on the safe account to repay the paymaster.', {
+          reason: TransactionErrorReason.INSUFFICIENT_BALANCE,
+          cause: err
+        })
       }
       throw err
     }

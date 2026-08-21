@@ -100,7 +100,7 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
      * @param {Partial<EvmErc4337WalletPaymasterTokenConfig | EvmErc4337WalletSponsorshipPolicyConfig | EvmErc4337WalletNativeCoinsConfig>} [config] - If set, overrides the given configuration options.
      * @returns {Promise<Omit<TransactionResult, 'hash'>>} The transaction's quotes.
      * @throws {ConfigurationError} If the override `config` is invalid or has missing required fields.
-     * @throws {Error} If the token paymaster reports AA50 (account does not hold the paymaster token).
+     * @throws {TransactionError} If the token paymaster reports AA50 (account does not hold the paymaster token).
      */
     quoteSendTransaction(tx: EvmErc4337Transaction | EvmErc4337Transaction[], config?: Partial<EvmErc4337WalletPaymasterTokenConfig | EvmErc4337WalletSponsorshipPolicyConfig | EvmErc4337WalletNativeCoinsConfig>): Promise<Omit<TransactionResult, "hash">>;
     /**
@@ -114,7 +114,7 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
      * @param {EvmErc4337GasOverrides} [txOverrides] - If set, applies these UserOperationV7 gas/fee overrides to the underlying transaction.
      * @returns {Promise<Omit<TransferResult, 'hash'>>} The transfer's quotes.
      * @throws {ConfigurationError} If the override `config` is invalid or has missing required fields.
-     * @throws {Error} If the token paymaster reports AA50 (account does not hold the paymaster token).
+     * @throws {TransactionError} If the token paymaster reports AA50 (account does not hold the paymaster token).
      */
     quoteTransfer(options: TransferOptions, config?: Partial<EvmErc4337WalletPaymasterTokenConfig | EvmErc4337WalletSponsorshipPolicyConfig | EvmErc4337WalletNativeCoinsConfig>, txOverrides?: EvmErc4337GasOverrides): Promise<Omit<TransferResult, "hash">>;
     /**
@@ -225,7 +225,7 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
      * @protected
      * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee'>} [config] - The configuration object.
      * @returns {Eip1193Provider} A wrapped Eip1193Provider instance.
-     * @throws {Error} If the `provider` option is set to an empty array.
+     * @throws {ValueError} If the `provider` option is set to an empty array.
      */
     protected _createFailoverProvider (config?: Omit<EvmErc4337WalletConfig, "transferMaxFee" | "transactionMaxFee">): Eip1193Provider
     /** @private */
@@ -264,7 +264,7 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
      * @param {EvmErc4337Transaction[]} txs - The EVM transactions to include in the UserOperation.
      * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee'>} config - The wallet configuration to use for the build.
      * @returns {Promise<BuiltUserOperation & Omit<TransactionResult, 'hash'>>} The built operation plus its raw fee (no tolerance buffer applied).
-     * @throws {Error} If the token paymaster reports AA50 (account does not hold the paymaster token).
+     * @throws {TransactionError} If the token paymaster reports AA50 (account does not hold the paymaster token).
      */
     protected _getUserOperationGasCost(txs: EvmErc4337Transaction[], config: Omit<EvmErc4337WalletConfig, "transferMaxFee" | "transactionMaxFee">): Promise<BuiltUserOperation & Omit<TransactionResult, "hash">>;
 }
