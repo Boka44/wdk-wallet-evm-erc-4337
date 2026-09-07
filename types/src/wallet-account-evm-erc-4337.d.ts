@@ -9,6 +9,16 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
      */
     constructor(seed: string | Uint8Array, path: string, config: EvmErc4337WalletConfig);
     /**
+     * Creates a read-only account for a safe whose address is already known. Not supported on the writable
+     * account: a safe address cannot produce a signer. Use {@link WalletAccountReadOnlyEvmErc4337.fromSafeAddress}.
+     *
+     * @param {string} safeAddress - The safe's evm address.
+     * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee' | 'transactionMaxFee'>} config - The configuration object.
+     * @throws {UnsupportedOperationError} Always; a writable account cannot be created from a safe address.
+     * @returns {never}
+     */
+    static fromSafeAddress(safeAddress: string, config: Omit<EvmErc4337WalletConfig, "transferMaxFee" | "transactionMaxFee">): never;
+    /**
      * The evm erc-4337 wallet account configuration.
      *
      * @protected

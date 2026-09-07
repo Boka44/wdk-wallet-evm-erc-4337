@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, jest, test } from '@jest/globals'
 import * as bip39 from 'bip39'
 import { Contract, keccak256, toUtf8Bytes } from 'ethers'
-import { MaximumFeeExceededError, ProviderRequiredError, TransactionError, TransactionErrorReason, ValueError } from '@tetherto/wdk-wallet'
+import { MaximumFeeExceededError, ProviderRequiredError, TransactionError, TransactionErrorReason, UnsupportedOperationError, ValueError } from '@tetherto/wdk-wallet'
 
 const actualWalletEvm = await import('@tetherto/wdk-wallet-evm')
 const actualAk = await import('abstractionkit')
@@ -181,6 +181,17 @@ describe('@tetherto/wdk-wallet-evm-erc-4337', () => {
       test('should throw if the safe modules version is not supported', () => {
         expect(() => new WalletAccountEvmErc4337(SEED_PHRASE, "0'/0/0", { ...SPONSORED_CONFIG, safeModulesVersion: '0.2.0' }))
           .toThrow(new ConfigurationError('Unsupported safe modules version: 0.2.0'))
+      })
+    })
+
+    describe('fromSafeAddress', () => {
+      test('should throw because a writable account cannot be created from a safe address', () => {
+        const SAFE_ADDRESS = '0xFE0847a52f1C75A01B06cFC636c87683E72a6029'
+
+        expect(() => WalletAccountEvmErc4337.fromSafeAddress(SAFE_ADDRESS, SPONSORED_CONFIG))
+          .toThrow(expect.objectContaining({ name: 'UnsupportedOperationError' }))
+        expect(() => WalletAccountEvmErc4337.fromSafeAddress(SAFE_ADDRESS, SPONSORED_CONFIG))
+          .toThrow(new UnsupportedOperationError('fromSafeAddress(safeAddress, config)'))
       })
     })
 

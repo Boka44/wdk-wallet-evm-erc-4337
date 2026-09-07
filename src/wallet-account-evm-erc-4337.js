@@ -16,7 +16,7 @@
 
 import { Contract, hexlify, keccak256, randomBytes, toUtf8Bytes } from 'ethers'
 
-import { MaximumFeeExceededError, ProviderRequiredError, TransactionError, TransactionErrorReason, ValueError } from '@tetherto/wdk-wallet'
+import { MaximumFeeExceededError, ProviderRequiredError, TransactionError, TransactionErrorReason, UnsupportedOperationError, ValueError } from '@tetherto/wdk-wallet'
 
 import { WalletAccountEvm } from '@tetherto/wdk-wallet-evm'
 
@@ -93,6 +93,19 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
      * @type {Map<string, TransactionQuote>}
      */
     this._quoteCache = new Map()
+  }
+
+  /**
+   * Creates a read-only account for a safe whose address is already known. Not supported on the writable
+   * account: a safe address cannot produce a signer. Use {@link WalletAccountReadOnlyEvmErc4337.fromSafeAddress}.
+   *
+   * @param {string} safeAddress - The safe's evm address.
+   * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee' | 'transactionMaxFee'>} config - The configuration object.
+   * @throws {UnsupportedOperationError} Always; a writable account cannot be created from a safe address.
+   * @returns {never}
+   */
+  static fromSafeAddress (safeAddress, config) {
+    throw new UnsupportedOperationError('fromSafeAddress(safeAddress, config)')
   }
 
   /**
