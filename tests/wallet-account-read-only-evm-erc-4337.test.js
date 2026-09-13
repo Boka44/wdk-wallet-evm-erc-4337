@@ -589,6 +589,20 @@ describe('@tetherto/wdk-wallet-evm-erc-4337', () => {
         await expect(promise).rejects.toMatchObject({ reason: TransactionErrorReason.INSUFFICIENT_BALANCE })
       })
 
+      test('should reframe AA50 errors identified only by aaCode, with no AA50 substring in the message', async () => {
+        createPaymasterUserOperationMock.mockRejectedValue(
+          new actualAk.AbstractionKitError('SIMULATE_PAYMASTER_VALIDATION', 'paymaster eth_call rpc call failed', { aaCode: 'AA50' })
+        )
+
+        const pmAccount = new WalletAccountReadOnlyEvmErc4337(OWNER_ADDRESS, PAYMASTER_TOKEN_CONFIG)
+
+        const promise = pmAccount.quoteSendTransaction(TRANSACTION)
+
+        await expect(promise).rejects.toThrow(TransactionError)
+        await expect(promise).rejects.toThrow('Token paymaster requires the account to hold the paymaster token for fee estimation.')
+        await expect(promise).rejects.toMatchObject({ reason: TransactionErrorReason.INSUFFICIENT_BALANCE })
+      })
+
       test('should propagate non-AbstractionKitError errors from the paymaster', async () => {
         createPaymasterUserOperationMock.mockRejectedValue(new Error('boom'))
 

@@ -435,6 +435,30 @@ describe('@tetherto/wdk-wallet-evm-erc-4337', () => {
         await expect(promise).rejects.toThrow('Not enough funds on the safe account to repay the paymaster.')
         await expect(promise).rejects.toMatchObject({ reason: TransactionErrorReason.INSUFFICIENT_BALANCE })
       })
+
+      test('should reframe AA50 errors identified only by aaCode, with no AA50 substring in the message', async () => {
+        sendUserOperationMock.mockRejectedValue(
+          new actualAk.AbstractionKitError('BUNDLER_ERROR', 'bundler eth_sendUserOperation rpc call failed', { aaCode: 'AA50' })
+        )
+
+        const promise = account.sendTransaction(TRANSACTION)
+
+        await expect(promise).rejects.toThrow(TransactionError)
+        await expect(promise).rejects.toThrow('Not enough funds on the safe account to repay the paymaster.')
+        await expect(promise).rejects.toMatchObject({ reason: TransactionErrorReason.INSUFFICIENT_BALANCE })
+      })
+
+      test('should reframe AA50 errors identified only by aaCode when broadcasting an already-signed user operation', async () => {
+        sendUserOperationMock.mockRejectedValue(
+          new actualAk.AbstractionKitError('BUNDLER_ERROR', 'bundler eth_sendUserOperation rpc call failed', { aaCode: 'AA50' })
+        )
+
+        const promise = account.sendTransaction({ ...DUMMY_USER_OP, signature: DUMMY_OP_SIGNATURE })
+
+        await expect(promise).rejects.toThrow(TransactionError)
+        await expect(promise).rejects.toThrow('Not enough funds on the safe account to repay the paymaster.')
+        await expect(promise).rejects.toMatchObject({ reason: TransactionErrorReason.INSUFFICIENT_BALANCE })
+      })
     })
 
     describe('nonce lanes', () => {

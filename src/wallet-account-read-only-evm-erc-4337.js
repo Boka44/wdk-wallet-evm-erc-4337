@@ -892,7 +892,7 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
 
       return { fee, ...buildResult }
     } catch (error) {
-      if (error instanceof AbstractionKitError && error.message.includes('AA50')) {
+      if (error instanceof AbstractionKitError && (error.aaCode === 'AA50' || error.message.includes('AA50'))) {
         throw new TransactionError(
           'Token paymaster requires the account to hold the paymaster token for fee estimation. ' +
           'Fund the account with the paymaster token before quoting.',

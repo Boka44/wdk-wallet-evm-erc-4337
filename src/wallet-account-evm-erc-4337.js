@@ -503,7 +503,7 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
 
       return await this._getBundler().sendUserOperation(userOp, smartAccount.entrypointAddress)
     } catch (err) {
-      if (err instanceof AbstractionKitError && err.message.includes('AA50')) {
+      if (err instanceof AbstractionKitError && (err.aaCode === 'AA50' || err.message.includes('AA50'))) {
         throw new TransactionError('Not enough funds on the safe account to repay the paymaster.', {
           reason: TransactionErrorReason.INSUFFICIENT_BALANCE,
           cause: err
@@ -525,7 +525,7 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
     try {
       return await this._getBundler().sendUserOperation(userOp, ENTRYPOINT_V7)
     } catch (err) {
-      if (err instanceof AbstractionKitError && err.message.includes('AA50')) {
+      if (err instanceof AbstractionKitError && (err.aaCode === 'AA50' || err.message.includes('AA50'))) {
         throw new TransactionError('Not enough funds on the safe account to repay the paymaster.', {
           reason: TransactionErrorReason.INSUFFICIENT_BALANCE,
           cause: err
