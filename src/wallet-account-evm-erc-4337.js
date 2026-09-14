@@ -20,7 +20,7 @@ import { MaximumFeeExceededError, ProviderRequiredError, TransactionError, Trans
 
 import { WalletAccountEvm } from '@tetherto/wdk-wallet-evm'
 
-import { AbstractionKitError, ENTRYPOINT_V7, calculateUserOperationMaxGasCost, fetchAccountNonce } from 'abstractionkit'
+import { ENTRYPOINT_V7, calculateUserOperationMaxGasCost, fetchAccountNonce } from 'abstractionkit'
 
 import WalletAccountReadOnlyEvmErc4337, { FEE_TOLERANCE_COEFFICIENT } from './wallet-account-read-only-evm-erc-4337.js'
 
@@ -419,7 +419,18 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
       ...(nonce !== undefined ? { nonce } : {})
     }
 
-    const { userOp, smartAccount, chainId, tokenQuote } = await this._buildUserOperation(calls, config, txOverrides)
+    let userOp, smartAccount, chainId, tokenQuote
+    try {
+      ;({ userOp, smartAccount, chainId, tokenQuote } = await this._buildUserOperation(calls, config, txOverrides))
+    } catch (err) {
+      if (WalletAccountReadOnlyEvmErc4337._isAA50Error(err)) {
+        throw new TransactionError('Not enough funds on the safe account to repay the paymaster.', {
+          reason: TransactionErrorReason.INSUFFICIENT_BALANCE,
+          cause: err
+        })
+      }
+      throw err
+    }
 
     const fee = config.isSponsored
       ? 0n
@@ -503,7 +514,7 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
 
       return await this._getBundler().sendUserOperation(userOp, smartAccount.entrypointAddress)
     } catch (err) {
-      if (err instanceof AbstractionKitError && err.message.includes('AA50')) {
+      if (WalletAccountReadOnlyEvmErc4337._isAA50Error(err)) {
         throw new TransactionError('Not enough funds on the safe account to repay the paymaster.', {
           reason: TransactionErrorReason.INSUFFICIENT_BALANCE,
           cause: err
@@ -525,7 +536,7 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
     try {
       return await this._getBundler().sendUserOperation(userOp, ENTRYPOINT_V7)
     } catch (err) {
-      if (err instanceof AbstractionKitError && err.message.includes('AA50')) {
+      if (WalletAccountReadOnlyEvmErc4337._isAA50Error(err)) {
         throw new TransactionError('Not enough funds on the safe account to repay the paymaster.', {
           reason: TransactionErrorReason.INSUFFICIENT_BALANCE,
           cause: err

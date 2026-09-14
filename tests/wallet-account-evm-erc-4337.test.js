@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, jest, test } from '@jest/globals'
 import * as bip39 from 'bip39'
 import { Contract, keccak256, toUtf8Bytes } from 'ethers'
-import { MaximumFeeExceededError, ProviderRequiredError, TransactionError, TransactionErrorReason, UnsupportedOperationError, ValueError } from '@tetherto/wdk-wallet'
+import { MaximumFeeExceededError, ProviderRequiredError, TransactionErrorReason, UnsupportedOperationError, ValueError } from '@tetherto/wdk-wallet'
 
 const actualWalletEvm = await import('@tetherto/wdk-wallet-evm')
 const actualAk = await import('abstractionkit')
@@ -413,27 +413,56 @@ describe('@tetherto/wdk-wallet-evm-erc-4337', () => {
       })
 
       test('should reframe AA50 errors from the bundler as a paymaster funds error', async () => {
-        sendUserOperationMock.mockRejectedValue(
-          new actualAk.AbstractionKitError('BUNDLER_ERROR', 'AA50: paymaster deposit too low')
-        )
+        const bundlerError = new actualAk.AbstractionKitError('BUNDLER_ERROR', 'AA50: paymaster deposit too low')
+        sendUserOperationMock.mockRejectedValue(bundlerError)
 
         const promise = account.sendTransaction(TRANSACTION)
 
-        await expect(promise).rejects.toThrow(TransactionError)
         await expect(promise).rejects.toThrow('Not enough funds on the safe account to repay the paymaster.')
-        await expect(promise).rejects.toMatchObject({ reason: TransactionErrorReason.INSUFFICIENT_BALANCE })
+        await expect(promise).rejects.toMatchObject({ reason: TransactionErrorReason.INSUFFICIENT_BALANCE, cause: bundlerError })
       })
 
       test('should reframe AA50 errors when broadcasting an already-signed user operation', async () => {
-        sendUserOperationMock.mockRejectedValue(
-          new actualAk.AbstractionKitError('BUNDLER_ERROR', 'AA50: paymaster deposit too low')
-        )
+        const bundlerError = new actualAk.AbstractionKitError('BUNDLER_ERROR', 'AA50: paymaster deposit too low')
+        sendUserOperationMock.mockRejectedValue(bundlerError)
 
         const promise = account.sendTransaction({ ...DUMMY_USER_OP, signature: DUMMY_OP_SIGNATURE })
 
-        await expect(promise).rejects.toThrow(TransactionError)
         await expect(promise).rejects.toThrow('Not enough funds on the safe account to repay the paymaster.')
-        await expect(promise).rejects.toMatchObject({ reason: TransactionErrorReason.INSUFFICIENT_BALANCE })
+        await expect(promise).rejects.toMatchObject({ reason: TransactionErrorReason.INSUFFICIENT_BALANCE, cause: bundlerError })
+      })
+
+      test('should reframe AA50 errors identified only by aaCode, with no AA50 substring in the message', async () => {
+        const bundlerError = new actualAk.AbstractionKitError('BUNDLER_ERROR', 'bundler eth_sendUserOperation rpc call failed', { aaCode: 'AA50' })
+        sendUserOperationMock.mockRejectedValue(bundlerError)
+
+        const promise = account.sendTransaction(TRANSACTION)
+
+        await expect(promise).rejects.toThrow('Not enough funds on the safe account to repay the paymaster.')
+        await expect(promise).rejects.toMatchObject({ reason: TransactionErrorReason.INSUFFICIENT_BALANCE, cause: bundlerError })
+      })
+
+      test('should reframe AA50 errors identified only by aaCode when broadcasting an already-signed user operation', async () => {
+        const bundlerError = new actualAk.AbstractionKitError('BUNDLER_ERROR', 'bundler eth_sendUserOperation rpc call failed', { aaCode: 'AA50' })
+        sendUserOperationMock.mockRejectedValue(bundlerError)
+
+        const promise = account.sendTransaction({ ...DUMMY_USER_OP, signature: DUMMY_OP_SIGNATURE })
+
+        await expect(promise).rejects.toThrow('Not enough funds on the safe account to repay the paymaster.')
+        await expect(promise).rejects.toMatchObject({ reason: TransactionErrorReason.INSUFFICIENT_BALANCE, cause: bundlerError })
+      })
+
+      test('should reframe AA50 errors surfaced while building the user operation', async () => {
+        const paymasterError = new actualAk.AbstractionKitError('SIMULATE_PAYMASTER_VALIDATION', 'AA50: paymaster deposit too low')
+        createPaymasterUserOperationMock.mockRejectedValue(paymasterError)
+
+        const pmAccount = new WalletAccountEvmErc4337(SEED_PHRASE, "0'/0/0", PAYMASTER_TOKEN_CONFIG)
+
+        const promise = pmAccount.sendTransaction(TRANSACTION)
+
+        await expect(promise).rejects.toThrow('Not enough funds on the safe account to repay the paymaster.')
+        await expect(promise).rejects.toMatchObject({ reason: TransactionErrorReason.INSUFFICIENT_BALANCE, cause: paymasterError })
+        expect(sendUserOperationMock).not.toHaveBeenCalled()
       })
     })
 
@@ -557,6 +586,18 @@ describe('@tetherto/wdk-wallet-evm-erc-4337', () => {
         await expect(account.signTransaction(TRANSACTION, { isSponsored: false }))
           .rejects.toThrow('Missing required paymaster token configuration fields: paymasterAddress, paymasterToken.')
       })
+
+      test('should reframe AA50 errors surfaced while building the user operation', async () => {
+        const paymasterError = new actualAk.AbstractionKitError('SIMULATE_PAYMASTER_VALIDATION', 'AA50: paymaster deposit too low')
+        createPaymasterUserOperationMock.mockRejectedValue(paymasterError)
+
+        const pmAccount = new WalletAccountEvmErc4337(SEED_PHRASE, "0'/0/0", PAYMASTER_TOKEN_CONFIG)
+
+        const promise = pmAccount.signTransaction(TRANSACTION)
+
+        await expect(promise).rejects.toThrow('Not enough funds on the safe account to repay the paymaster.')
+        await expect(promise).rejects.toMatchObject({ reason: TransactionErrorReason.INSUFFICIENT_BALANCE, cause: paymasterError })
+      })
     })
 
     describe('transfer', () => {
@@ -625,6 +666,19 @@ describe('@tetherto/wdk-wallet-evm-erc-4337', () => {
       test('should re-validate the merged config when a per-call override is provided', async () => {
         await expect(account.transfer(TRANSFER, { isSponsored: false }))
           .rejects.toThrow('Missing required paymaster token configuration fields: paymasterAddress, paymasterToken.')
+      })
+
+      test('should reframe AA50 errors surfaced while building the user operation', async () => {
+        const paymasterError = new actualAk.AbstractionKitError('SIMULATE_PAYMASTER_VALIDATION', 'AA50: paymaster deposit too low')
+        createPaymasterUserOperationMock.mockRejectedValue(paymasterError)
+
+        const pmAccount = new WalletAccountEvmErc4337(SEED_PHRASE, "0'/0/0", PAYMASTER_TOKEN_CONFIG)
+
+        const promise = pmAccount.transfer(TRANSFER)
+
+        await expect(promise).rejects.toThrow('Not enough funds on the safe account to repay the paymaster.')
+        await expect(promise).rejects.toMatchObject({ reason: TransactionErrorReason.INSUFFICIENT_BALANCE, cause: paymasterError })
+        expect(sendUserOperationMock).not.toHaveBeenCalled()
       })
     })
 
