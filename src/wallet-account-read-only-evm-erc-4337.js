@@ -865,6 +865,20 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
   }
 
   /**
+   * Determines whether an error from AbstractionKit is an AA50 paymaster funds error.
+   *
+   * Checked via `aaCode` first; falls back to matching the substring in `message` for
+   * bundlers/paymasters that don't populate `aaCode`.
+   *
+   * @protected
+   * @param {unknown} err - The error to inspect.
+   * @returns {boolean} `true` if `err` represents an AA50 error.
+   */
+  static _isAA50Error (err) {
+    return err instanceof AbstractionKitError && (err.aaCode === 'AA50' || err.message.includes('AA50'))
+  }
+
+  /**
    * Builds a UserOperation and returns its estimated gas cost.
    *
    * Returns the cost in the paymaster token when a token quote is available, otherwise in
@@ -892,7 +906,7 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
 
       return { fee, ...buildResult }
     } catch (error) {
-      if (error instanceof AbstractionKitError && (error.aaCode === 'AA50' || error.message.includes('AA50'))) {
+      if (WalletAccountReadOnlyEvmErc4337._isAA50Error(error)) {
         throw new TransactionError(
           'Token paymaster requires the account to hold the paymaster token for fee estimation. ' +
           'Fund the account with the paymaster token before quoting.',
