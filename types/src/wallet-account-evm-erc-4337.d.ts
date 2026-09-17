@@ -9,6 +9,16 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
      */
     constructor(seed: string | Uint8Array, path: string, config: EvmErc4337WalletConfig);
     /**
+     * Creates a read-only account for a safe whose address is already known. Not supported on the writable
+     * account: a safe address cannot produce a signer. Use {@link WalletAccountReadOnlyEvmErc4337.fromSafeAddress}.
+     *
+     * @param {string} safeAddress - The safe's evm address.
+     * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee' | 'transactionMaxFee'>} config - The configuration object.
+     * @throws {UnsupportedOperationError} Always; a writable account cannot be created from a safe address.
+     * @returns {never}
+     */
+    static fromSafeAddress(safeAddress: string, config: Omit<EvmErc4337WalletConfig, "transferMaxFee" | "transactionMaxFee">): never;
+    /**
      * The evm erc-4337 wallet account configuration.
      *
      * @protected
@@ -63,7 +73,10 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
      * @param {EvmErc4337Transaction} tx - The transaction to include in the user operation.
      * @param {Partial<EvmErc4337WalletPaymasterTokenConfig | EvmErc4337WalletSponsorshipPolicyConfig | EvmErc4337WalletNativeCoinsConfig>} [config] - If set, overrides the given configuration options.
      * @returns {Promise<UserOperationV7>} The signed user operation.
-     * @throws {Error} If the transaction is not sponsored, and the transaction's cost surpasses the transaction max. fee option.
+     * @throws {ConfigurationError} If the override `config` is invalid or has missing required fields.
+     * @throws {ConfigurationError} If, in token mode, the configured `paymasterAddress` does not match the paymaster address returned by the paymaster RPC. This guards against the auto-generated ERC-20 approval targeting an unexpected paymaster contract.
+     * @throws {MaximumFeeExceededError} If the transaction is not sponsored, and the transaction's cost surpasses the transaction max. fee option.
+     * @throws {TransactionError} If the paymaster reports AA50 (the account cannot repay the paymaster).
      */
     signTransaction(tx: EvmErc4337Transaction, config?: Partial<EvmErc4337WalletPaymasterTokenConfig | EvmErc4337WalletSponsorshipPolicyConfig | EvmErc4337WalletNativeCoinsConfig>): Promise<UserOperationV7>;
     /**
@@ -72,7 +85,8 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
      * @param {ApproveOptions} options - The approve options.
      * @param {EvmErc4337GasOverrides} [txOverrides] - If set, applies these UserOperationV7 gas/fee overrides to the underlying transaction.
      * @returns {Promise<TransactionResult>} - The transaction's result.
-     * @throws {Error} - If trying to approve usdts on ethereum with allowance not equal to zero (due to the usdt allowance reset requirement).
+     * @throws {ProviderRequiredError} - If the wallet is not connected to a provider.
+     * @throws {ValueError} - If trying to approve usdts on ethereum with allowance not equal to zero (due to the usdt allowance reset requirement).
      */
     approve(options: ApproveOptions, txOverrides?: EvmErc4337GasOverrides): Promise<TransactionResult>;
     /**
@@ -88,6 +102,9 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
      * @param {EvmErc4337Transaction | EvmErc4337Transaction[]} tx - The transaction, or an array of multiple transactions to send in batch.
      * @param {Partial<EvmErc4337WalletPaymasterTokenConfig | EvmErc4337WalletSponsorshipPolicyConfig | EvmErc4337WalletNativeCoinsConfig>} [config] - If set, overrides the given configuration options.
      * @returns {Promise<Omit<TransactionResult, 'hash'>>} The transaction's quotes.
+     * @throws {ConfigurationError} If the override `config` is invalid or has missing required fields.
+     * @throws {ConfigurationError} If, in token mode, the configured `paymasterAddress` does not match the paymaster address returned by the paymaster RPC. This guards against the auto-generated ERC-20 approval targeting an unexpected paymaster contract.
+     * @throws {TransactionError} If the paymaster reports AA50 (the account cannot repay the paymaster).
      */
     quoteSendTransaction(tx: EvmErc4337Transaction | EvmErc4337Transaction[] | UserOperationV7, config?: Partial<EvmErc4337WalletPaymasterTokenConfig | EvmErc4337WalletSponsorshipPolicyConfig | EvmErc4337WalletNativeCoinsConfig>): Promise<Omit<TransactionResult, "hash">>;
     /**
@@ -101,7 +118,11 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
      * @param {EvmErc4337Transaction | EvmErc4337Transaction[]} tx -  The transaction, or an array of multiple transactions to send in batch.
      * @param {Partial<EvmErc4337WalletPaymasterTokenConfig | EvmErc4337WalletSponsorshipPolicyConfig | EvmErc4337WalletNativeCoinsConfig>} [config] - If set, overrides the given configuration options.
      * @returns {Promise<TransactionResult>} The transaction's result.
-     * @throws {Error} If the transaction is not sponsored, and the transaction's cost surpasses the transaction max. fee option.
+     * @throws {ConfigurationError} If the override `config` is invalid or has missing required fields.
+     * @throws {ConfigurationError} If, in token mode, the configured `paymasterAddress` does not match the paymaster address returned by the paymaster RPC. This guards against the auto-generated ERC-20 approval targeting an unexpected paymaster contract.
+     * @throws {MaximumFeeExceededError} If the transaction is not sponsored, and the transaction's cost surpasses the transaction max. fee option.
+     * @throws {ValueError} If `nonceKey` is a bigint outside the uint192 range (0 to 2^192 - 1).
+     * @throws {TransactionError} If the paymaster reports AA50 (the account cannot repay the paymaster).
      */
     sendTransaction(tx: EvmErc4337Transaction | EvmErc4337Transaction[] | UserOperationV7, config?: Partial<EvmErc4337WalletPaymasterTokenConfig | EvmErc4337WalletSponsorshipPolicyConfig | EvmErc4337WalletNativeCoinsConfig>): Promise<TransactionResult>;
     /**
@@ -113,7 +134,11 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
      * @param {Partial<EvmErc4337WalletPaymasterTokenConfig | EvmErc4337WalletSponsorshipPolicyConfig | EvmErc4337WalletNativeCoinsConfig>} [config] - If set, overrides the given configuration options.
      * @param {EvmErc4337GasOverrides} [txOverrides] - If set, applies these UserOperationV7 gas/fee overrides to the underlying transaction.
      * @returns {Promise<TransferResult>} The transfer's result.
-     * @throws {Error} If the transaction is not sponsored, and the transfer's cost surpasses the transfer max. fee option.
+     * @throws {ConfigurationError} If the override `config` is invalid or has missing required fields.
+     * @throws {ConfigurationError} If, in token mode, the configured `paymasterAddress` does not match the paymaster address returned by the paymaster RPC. This guards against the auto-generated ERC-20 approval targeting an unexpected paymaster contract.
+     * @throws {MaximumFeeExceededError} If the transaction is not sponsored, and the transfer's cost surpasses the transfer max. fee option.
+     * @throws {ValueError} If `nonceKey` is a bigint outside the uint192 range (0 to 2^192 - 1).
+     * @throws {TransactionError} If the paymaster reports AA50 (the account cannot repay the paymaster).
      */
     transfer(options: TransferOptions, config?: Partial<EvmErc4337WalletPaymasterTokenConfig | EvmErc4337WalletSponsorshipPolicyConfig | EvmErc4337WalletNativeCoinsConfig>, txOverrides?: EvmErc4337GasOverrides): Promise<TransferResult>;
     /**

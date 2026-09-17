@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, jest, test } from '@jest/globals'
 import { Contract } from 'ethers'
+import { NoSuchElementError, TransactionError, TransactionErrorReason, UnsupportedOperationError, ValueError, WdkError } from '@tetherto/wdk-wallet'
 
 const actualWalletEvm = await import('@tetherto/wdk-wallet-evm')
 const actualAk = await import('abstractionkit')
@@ -9,6 +10,7 @@ const getTokenBalanceMock = jest.fn()
 const getTokenBalancesMock = jest.fn()
 const getAllowanceMock = jest.fn()
 const evmGetTransactionReceiptMock = jest.fn()
+const evmGetTransactionMock = jest.fn()
 const verifyMock = jest.fn()
 const verifyTypedDataMock = jest.fn()
 
@@ -18,6 +20,7 @@ const WalletAccountReadOnlyEvmMock = jest.fn().mockImplementation(() => ({
   getTokenBalances: getTokenBalancesMock,
   getAllowance: getAllowanceMock,
   getTransactionReceipt: evmGetTransactionReceiptMock,
+  getTransaction: evmGetTransactionMock,
   verify: verifyMock,
   verifyTypedData: verifyTypedDataMock
 }))
@@ -90,6 +93,7 @@ const DUMMY_TX_HASH = '0xdef456abc123def456abc123def456abc123def456abc123def456a
 const DUMMY_USER_OP_RECEIPT = {
   userOpHash: DUMMY_USER_OP_HASH,
   success: true,
+  actualGasCost: 42_000_000_000_000n,
   receipt: {
     transactionHash: DUMMY_TX_HASH
   }
@@ -100,6 +104,16 @@ const DUMMY_TX_RECEIPT = {
   blockNumber: 12345,
   status: 1,
   gasUsed: 21000n
+}
+
+const DUMMY_EVM_TX_INFO = {
+  hash: DUMMY_TX_HASH,
+  finality: 'confirmed',
+  success: true,
+  block: '0x' + '22'.repeat(32),
+  fee: 21_000n * 2_000_000_000n,
+  confirmations: 3,
+  receipt: DUMMY_TX_RECEIPT
 }
 
 const DUMMY_USER_OP = {
@@ -172,9 +186,69 @@ describe('@tetherto/wdk-wallet-evm-erc-4337', () => {
           .toThrow(new ConfigurationError('Unsupported safe modules version: 0.2.0'))
       })
 
+      test('should throw a configuration error that is part of the wdk error taxonomy', () => {
+        expect(() => new WalletAccountReadOnlyEvmErc4337(OWNER_ADDRESS, { ...SPONSORED_CONFIG, safeModulesVersion: '0.2.0' }))
+          .toThrow(ValueError)
+        expect(() => new WalletAccountReadOnlyEvmErc4337(OWNER_ADDRESS, { ...SPONSORED_CONFIG, safeModulesVersion: '0.2.0' }))
+          .toThrow(WdkError)
+      })
+
+      test('should throw if the owner address is not a well-formed evm address', () => {
+        expect(() => new WalletAccountReadOnlyEvmErc4337('not-an-address', SPONSORED_CONFIG))
+          .toThrow(expect.objectContaining({ name: 'ValueError' }))
+        expect(() => new WalletAccountReadOnlyEvmErc4337('not-an-address', SPONSORED_CONFIG))
+          .toThrow(new ValueError("Invalid owner address: 'not-an-address'."))
+      })
+
       test('should throw if the provider is an empty list', () => {
         expect(() => new WalletAccountReadOnlyEvmErc4337(OWNER_ADDRESS, { ...SPONSORED_CONFIG, provider: [] }))
+          .toThrow(ValueError)
+        expect(() => new WalletAccountReadOnlyEvmErc4337(OWNER_ADDRESS, { ...SPONSORED_CONFIG, provider: [] }))
           .toThrow("The 'provider' option cannot be set to an empty list.")
+      })
+
+      test('should reflect changes made to the configuration object after construction', async () => {
+        const config = { ...SPONSORED_CONFIG }
+        const mutableAccount = new WalletAccountReadOnlyEvmErc4337(OWNER_ADDRESS, config)
+        config.bundlerUrl = 'https://dummy-other-bundler.url/'
+
+        await mutableAccount.getBalance()
+
+        expect(WalletAccountReadOnlyEvmMock).toHaveBeenCalledWith(SAFE_ADDRESS, { ...SPONSORED_CONFIG, bundlerUrl: 'https://dummy-other-bundler.url/' })
+      })
+    })
+
+    describe('_getChainId', () => {
+      const TRANSACTION = { to: SPENDER, value: 1, data: '0x' }
+
+      test('should throw if the provider reports a chain other than the configured chainId', async () => {
+        // EIP1193_PROVIDER answers eth_chainId with 0x1 (mainnet).
+        const mismatched = new WalletAccountReadOnlyEvmErc4337(OWNER_ADDRESS, { ...NATIVE_COINS_CONFIG, chainId: 137 })
+
+        await expect(mismatched.quoteSendTransaction(TRANSACTION))
+          .rejects.toThrow(new ConfigurationError('Provider is on chain 1 but the wallet is configured for chain 137'))
+        expect(isDeployedMock).not.toHaveBeenCalled()
+        expect(createUserOperationMock).not.toHaveBeenCalled()
+      })
+
+      test('should return the chain id when it matches the configured chainId', async () => {
+        const matched = new WalletAccountReadOnlyEvmErc4337(OWNER_ADDRESS, { ...NATIVE_COINS_CONFIG, chainId: 1 })
+
+        await expect(matched._getChainId()).resolves.toBe(1n)
+      })
+
+      test('should not enforce a chain when chainId is omitted from the config', async () => {
+        await expect(account._getChainId()).resolves.toBe(1n)
+      })
+
+      test('should read the chain id from the provider only once', async () => {
+        EIP1193_PROVIDER.request.mockClear()
+
+        await account._getChainId()
+        await account._getChainId()
+
+        const chainIdCalls = EIP1193_PROVIDER.request.mock.calls.filter(([{ method }]) => method === 'eth_chainId')
+        expect(chainIdCalls).toHaveLength(1)
       })
     })
 
@@ -192,6 +266,115 @@ describe('@tetherto/wdk-wallet-evm-erc-4337', () => {
         })
 
         expect(address).toBe(SAFE_ADDRESS)
+      })
+
+      test('should throw if the owner address is not a well-formed evm address', () => {
+        expect(() => WalletAccountReadOnlyEvmErc4337.predictSafeAddress('not-an-address', { safeModulesVersion: '0.3.0' }))
+          .toThrow(expect.objectContaining({ name: 'ValueError' }))
+        expect(() => WalletAccountReadOnlyEvmErc4337.predictSafeAddress('not-an-address', { safeModulesVersion: '0.3.0' }))
+          .toThrow(new ValueError("Invalid owner address: 'not-an-address'."))
+      })
+    })
+
+    describe('fromSafeAddress', () => {
+      const EXISTING_SAFE_ADDRESS = '0xFE0847a52f1C75A01B06cFC636c87683E72a6029'
+
+      test('should use the given safe address as the account address', async () => {
+        const safeAccount = WalletAccountReadOnlyEvmErc4337.fromSafeAddress(EXISTING_SAFE_ADDRESS, SPONSORED_CONFIG)
+
+        const address = await safeAccount.getAddress()
+
+        expect(address).toBe(EXISTING_SAFE_ADDRESS)
+      })
+
+      test('should read the balance of the given safe address', async () => {
+        getBalanceMock.mockResolvedValue(DUMMY_BALANCE)
+
+        const safeAccount = WalletAccountReadOnlyEvmErc4337.fromSafeAddress(EXISTING_SAFE_ADDRESS, SPONSORED_CONFIG)
+        const balance = await safeAccount.getBalance()
+
+        expect(balance).toBe(DUMMY_BALANCE)
+        expect(WalletAccountReadOnlyEvmMock).toHaveBeenCalledWith(EXISTING_SAFE_ADDRESS, SPONSORED_CONFIG)
+      })
+
+      test('should quote against the given safe address', async () => {
+        createPaymasterUserOperationMock.mockResolvedValue({
+          userOperation: { ...DUMMY_USER_OP },
+          tokenQuote: { tokenCost: 500_000n }
+        })
+
+        const safeAccount = WalletAccountReadOnlyEvmErc4337.fromSafeAddress(EXISTING_SAFE_ADDRESS, PAYMASTER_TOKEN_CONFIG)
+        const { fee } = await safeAccount.quoteSendTransaction({ to: SPENDER, value: 1, data: '0x' })
+
+        expect(fee).toBe(600_000n)
+        expect(SafeAccountMock).toHaveBeenCalledWith(EXISTING_SAFE_ADDRESS, INIT_CODE_OVERRIDES)
+      })
+
+      test('should throw if the safe modules version is not supported', () => {
+        expect(() => WalletAccountReadOnlyEvmErc4337.fromSafeAddress(EXISTING_SAFE_ADDRESS, { ...SPONSORED_CONFIG, safeModulesVersion: '0.2.0' }))
+          .toThrow(new ConfigurationError('Unsupported safe modules version: 0.2.0'))
+      })
+
+      test('should normalize a lowercase safe address to its checksummed form', async () => {
+        const safeAccount = WalletAccountReadOnlyEvmErc4337.fromSafeAddress(EXISTING_SAFE_ADDRESS.toLowerCase(), SPONSORED_CONFIG)
+
+        const address = await safeAccount.getAddress()
+
+        expect(address).toBe(EXISTING_SAFE_ADDRESS)
+      })
+
+      test('should throw if the safe address is not a well-formed evm address', () => {
+        expect(() => WalletAccountReadOnlyEvmErc4337.fromSafeAddress('not-an-address', SPONSORED_CONFIG))
+          .toThrow(expect.objectContaining({ name: 'ValueError' }))
+        expect(() => WalletAccountReadOnlyEvmErc4337.fromSafeAddress('not-an-address', SPONSORED_CONFIG))
+          .toThrow(new ValueError("Invalid safe address: 'not-an-address'."))
+      })
+
+      test('should throw if the safe address has an invalid checksum', () => {
+        const BAD_CHECKSUM_ADDRESS = '0xFE0847A52f1C75A01B06cFC636c87683E72a6029'
+
+        expect(() => WalletAccountReadOnlyEvmErc4337.fromSafeAddress(BAD_CHECKSUM_ADDRESS, SPONSORED_CONFIG))
+          .toThrow(expect.objectContaining({ name: 'ValueError' }))
+        expect(() => WalletAccountReadOnlyEvmErc4337.fromSafeAddress(BAD_CHECKSUM_ADDRESS, SPONSORED_CONFIG))
+          .toThrow(new ValueError(`Invalid safe address: '${BAD_CHECKSUM_ADDRESS}'.`))
+      })
+
+      test('should throw if the provider is an empty list', () => {
+        expect(() => WalletAccountReadOnlyEvmErc4337.fromSafeAddress(EXISTING_SAFE_ADDRESS, { ...SPONSORED_CONFIG, provider: [] }))
+          .toThrow(expect.objectContaining({ name: 'ValueError' }))
+        expect(() => WalletAccountReadOnlyEvmErc4337.fromSafeAddress(EXISTING_SAFE_ADDRESS, { ...SPONSORED_CONFIG, provider: [] }))
+          .toThrow("The 'provider' option cannot be set to an empty list.")
+      })
+
+      test('should throw when verifying a message because the safe owner is unknown', async () => {
+        const safeAccount = WalletAccountReadOnlyEvmErc4337.fromSafeAddress(EXISTING_SAFE_ADDRESS, SPONSORED_CONFIG)
+
+        await expect(safeAccount.verify('Dummy message to sign.', '0xdead'))
+          .rejects.toThrow(expect.objectContaining({ name: 'UnsupportedOperationError' }))
+        await expect(safeAccount.verify('Dummy message to sign.', '0xdead'))
+          .rejects.toThrow(new UnsupportedOperationError('verify(message, signature)'))
+        expect(verifyMock).not.toHaveBeenCalled()
+      })
+
+      test('should throw when verifying typed data because the safe owner is unknown', async () => {
+        const safeAccount = WalletAccountReadOnlyEvmErc4337.fromSafeAddress(EXISTING_SAFE_ADDRESS, SPONSORED_CONFIG)
+
+        await expect(safeAccount.verifyTypedData({ domain: {}, types: {}, message: {} }, '0xdead'))
+          .rejects.toThrow(expect.objectContaining({ name: 'UnsupportedOperationError' }))
+        await expect(safeAccount.verifyTypedData({ domain: {}, types: {}, message: {} }, '0xdead'))
+          .rejects.toThrow(new UnsupportedOperationError('verifyTypedData(typedData, signature)'))
+        expect(verifyTypedDataMock).not.toHaveBeenCalled()
+      })
+
+      test('should throw when quoting for a safe that is not deployed', async () => {
+        isDeployedMock.mockResolvedValue(false)
+
+        const safeAccount = WalletAccountReadOnlyEvmErc4337.fromSafeAddress(EXISTING_SAFE_ADDRESS, PAYMASTER_TOKEN_CONFIG)
+
+        await expect(safeAccount.quoteSendTransaction({ to: SPENDER, value: 1, data: '0x' }))
+          .rejects.toThrow(expect.objectContaining({ name: 'ConfigurationError' }))
+        await expect(safeAccount.quoteSendTransaction({ to: SPENDER, value: 1, data: '0x' }))
+          .rejects.toThrow(new ConfigurationError(`The safe at '${EXISTING_SAFE_ADDRESS}' is not deployed. Deploying it requires the owner's address, which an account created from a safe address does not have.`))
       })
     })
 
@@ -286,7 +469,7 @@ describe('@tetherto/wdk-wallet-evm-erc-4337', () => {
         expect(createPaymasterUserOperationMock).toHaveBeenCalledWith(
           SafeAccountMock.mock.results[0].value,
           { ...DUMMY_USER_OP },
-          PAYMASTER_TOKEN_CONFIG.bundlerUrl,
+          new actualAk.HttpTransport(PAYMASTER_TOKEN_CONFIG.bundlerUrl, {}),
           { token: TOKEN_ADDRESS },
           { entrypoint: actualAk.ENTRYPOINT_V7 }
         )
@@ -328,7 +511,7 @@ describe('@tetherto/wdk-wallet-evm-erc-4337', () => {
         expect(createUserOperationMock).toHaveBeenCalledWith(
           [{ to: SPENDER, value: 1n, data: '0x' }],
           EIP1193_PROVIDER,
-          NATIVE_COINS_CONFIG.bundlerUrl,
+          new actualAk.HttpTransport(NATIVE_COINS_CONFIG.bundlerUrl, {}),
           {}
         )
         expect(createPaymasterUserOperationMock).not.toHaveBeenCalled()
@@ -346,7 +529,7 @@ describe('@tetherto/wdk-wallet-evm-erc-4337', () => {
         expect(createPaymasterUserOperationMock).toHaveBeenCalledWith(
           SafeAccountMock.mock.results[0].value,
           { ...DUMMY_USER_OP },
-          PAYMASTER_TOKEN_CONFIG.bundlerUrl,
+          new actualAk.HttpTransport(PAYMASTER_TOKEN_CONFIG.bundlerUrl, {}),
           { token: TOKEN_ADDRESS },
           { entrypoint: actualAk.ENTRYPOINT_V7, callGasLimit: 111_111n }
         )
@@ -399,8 +582,25 @@ describe('@tetherto/wdk-wallet-evm-erc-4337', () => {
 
         const pmAccount = new WalletAccountReadOnlyEvmErc4337(OWNER_ADDRESS, PAYMASTER_TOKEN_CONFIG)
 
-        await expect(pmAccount.quoteSendTransaction(TRANSACTION))
-          .rejects.toThrow('Token paymaster requires the account to hold the paymaster token for fee estimation.')
+        const promise = pmAccount.quoteSendTransaction(TRANSACTION)
+
+        await expect(promise).rejects.toThrow(TransactionError)
+        await expect(promise).rejects.toThrow('Token paymaster requires the account to hold the paymaster token for fee estimation.')
+        await expect(promise).rejects.toMatchObject({ reason: TransactionErrorReason.INSUFFICIENT_BALANCE })
+      })
+
+      test('should reframe AA50 errors identified only by aaCode, with no AA50 substring in the message', async () => {
+        createPaymasterUserOperationMock.mockRejectedValue(
+          new actualAk.AbstractionKitError('SIMULATE_PAYMASTER_VALIDATION', 'paymaster eth_call rpc call failed', { aaCode: 'AA50' })
+        )
+
+        const pmAccount = new WalletAccountReadOnlyEvmErc4337(OWNER_ADDRESS, PAYMASTER_TOKEN_CONFIG)
+
+        const promise = pmAccount.quoteSendTransaction(TRANSACTION)
+
+        await expect(promise).rejects.toThrow(TransactionError)
+        await expect(promise).rejects.toThrow('Token paymaster requires the account to hold the paymaster token for fee estimation.')
+        await expect(promise).rejects.toMatchObject({ reason: TransactionErrorReason.INSUFFICIENT_BALANCE })
       })
 
       test('should propagate non-AbstractionKitError errors from the paymaster', async () => {
@@ -437,6 +637,71 @@ describe('@tetherto/wdk-wallet-evm-erc-4337', () => {
         const { fee } = await pmAccount.quoteSendTransaction(TRANSACTION)
 
         expect(fee).toBe(600_000n)
+      })
+    })
+
+    describe('auth headers', () => {
+      const TRANSACTION = { to: SPENDER, value: 1, data: '0x' }
+      const BUNDLER_HEADERS = { Authorization: 'Bearer bundler-key' }
+      const PAYMASTER_HEADERS = { Authorization: 'Bearer paymaster-key' }
+      const ROTATED_HEADERS = { Authorization: 'Bearer rotated-key' }
+
+      beforeEach(() => {
+        createPaymasterUserOperationMock.mockResolvedValue({
+          userOperation: { ...DUMMY_USER_OP },
+          tokenQuote: { tokenCost: 500_000n }
+        })
+      })
+
+      test('should send each service its own headers when both are configured', async () => {
+        const pmAccount = new WalletAccountReadOnlyEvmErc4337(OWNER_ADDRESS, {
+          ...PAYMASTER_TOKEN_CONFIG,
+          bundlerHeaders: BUNDLER_HEADERS,
+          paymasterHeaders: PAYMASTER_HEADERS
+        })
+
+        const { fee } = await pmAccount.quoteSendTransaction(TRANSACTION)
+
+        expect(fee).toBe(600_000n)
+        expect(Erc7677PaymasterMock).toHaveBeenCalledTimes(1)
+        const [paymasterTransport] = Erc7677PaymasterMock.mock.calls[0]
+        expect(paymasterTransport).toBeInstanceOf(actualAk.HttpTransport)
+        expect(paymasterTransport.url).toBe(PAYMASTER_TOKEN_CONFIG.paymasterUrl)
+        expect(paymasterTransport.options).toEqual({ headers: PAYMASTER_HEADERS })
+        expect(createPaymasterUserOperationMock).toHaveBeenCalledWith(
+          SafeAccountMock.mock.results[0].value,
+          { ...DUMMY_USER_OP },
+          new actualAk.HttpTransport(PAYMASTER_TOKEN_CONFIG.bundlerUrl, { headers: BUNDLER_HEADERS }),
+          { token: TOKEN_ADDRESS },
+          { entrypoint: actualAk.ENTRYPOINT_V7 }
+        )
+      })
+
+      test('should create the paymaster transport without headers when paymasterHeaders is not configured', async () => {
+        const pmAccount = new WalletAccountReadOnlyEvmErc4337(OWNER_ADDRESS, PAYMASTER_TOKEN_CONFIG)
+
+        await pmAccount.quoteSendTransaction(TRANSACTION)
+
+        expect(Erc7677PaymasterMock).toHaveBeenCalledTimes(1)
+        const [paymasterTransport] = Erc7677PaymasterMock.mock.calls[0]
+        expect(paymasterTransport).toBeInstanceOf(actualAk.HttpTransport)
+        expect(paymasterTransport.options).toEqual({})
+      })
+
+      test('should create a separate paymaster client when a per-call override changes the headers', async () => {
+        const pmAccount = new WalletAccountReadOnlyEvmErc4337(OWNER_ADDRESS, {
+          ...PAYMASTER_TOKEN_CONFIG,
+          paymasterHeaders: PAYMASTER_HEADERS
+        })
+
+        await pmAccount.quoteSendTransaction(TRANSACTION)
+        await pmAccount.quoteSendTransaction(TRANSACTION, { paymasterHeaders: ROTATED_HEADERS })
+        // A repeat with the original headers must reuse the client cached by the first call.
+        await pmAccount.quoteSendTransaction(TRANSACTION)
+
+        expect(Erc7677PaymasterMock).toHaveBeenCalledTimes(2)
+        expect(Erc7677PaymasterMock.mock.calls[0][0].options).toEqual({ headers: PAYMASTER_HEADERS })
+        expect(Erc7677PaymasterMock.mock.calls[1][0].options).toEqual({ headers: ROTATED_HEADERS })
       })
     })
 
@@ -498,6 +763,80 @@ describe('@tetherto/wdk-wallet-evm-erc-4337', () => {
         const receipt = await account.getTransactionReceipt(DUMMY_USER_OP_HASH)
 
         expect(receipt).toBe(null)
+      })
+    })
+
+    describe('getTransaction', () => {
+      test('throws ValueError when the hash is not a valid user operation hash', async () => {
+        await expect(account.getTransaction('0xnotahash')).rejects.toThrow(ValueError)
+        expect(getUserOperationByHashMock).not.toHaveBeenCalled()
+      })
+
+      test('derives finality from the bundling tx and success/fee from the user operation', async () => {
+        getUserOperationByHashMock.mockResolvedValue({ transactionHash: DUMMY_TX_HASH })
+        getUserOperationReceiptMock.mockResolvedValue(DUMMY_USER_OP_RECEIPT)
+        evmGetTransactionMock.mockResolvedValue({ ...DUMMY_EVM_TX_INFO })
+
+        const info = await account.getTransaction(DUMMY_USER_OP_HASH)
+
+        expect(info.hash).toBe(DUMMY_USER_OP_HASH)
+        expect(info.finality).toBe('confirmed')
+        expect(info.confirmations).toBe(3)
+        expect(info.success).toBe(true)
+        expect(info.fee).toBe(DUMMY_USER_OP_RECEIPT.actualGasCost)
+        expect(info.receipt).toEqual(DUMMY_TX_RECEIPT)
+        expect(info.userOperationReceipt).toEqual(DUMMY_USER_OP_RECEIPT)
+        expect(evmGetTransactionMock).toHaveBeenCalledWith(DUMMY_TX_HASH)
+      })
+
+      test('reports success false when the user operation reverted inside a successful bundling tx', async () => {
+        getUserOperationByHashMock.mockResolvedValue({ transactionHash: DUMMY_TX_HASH })
+        getUserOperationReceiptMock.mockResolvedValue({ ...DUMMY_USER_OP_RECEIPT, success: false })
+        evmGetTransactionMock.mockResolvedValue({ ...DUMMY_EVM_TX_INFO, success: true })
+
+        const info = await account.getTransaction(DUMMY_USER_OP_HASH)
+
+        expect(info.success).toBe(false)
+      })
+
+      test('falls back to the tx success and fee when the user operation receipt is missing', async () => {
+        getUserOperationByHashMock.mockResolvedValue({ transactionHash: DUMMY_TX_HASH })
+        getUserOperationReceiptMock.mockResolvedValue(null)
+        evmGetTransactionMock.mockResolvedValue({ ...DUMMY_EVM_TX_INFO })
+
+        const info = await account.getTransaction(DUMMY_USER_OP_HASH)
+
+        expect(info.success).toBe(DUMMY_EVM_TX_INFO.success)
+        expect(info.fee).toBe(DUMMY_EVM_TX_INFO.fee)
+        expect(info.userOperationReceipt).toBe(null)
+      })
+
+      test('returns pending when the user operation is known but not yet mined', async () => {
+        getUserOperationByHashMock.mockResolvedValue({ transactionHash: null })
+
+        const info = await account.getTransaction(DUMMY_USER_OP_HASH)
+
+        expect(info.finality).toBe('pending')
+        expect(info.success).toBeUndefined()
+        expect(info.confirmations).toBe(0)
+        expect(info.receipt).toBeNull()
+        expect(info.userOperationReceipt).toBeNull()
+        expect(evmGetTransactionMock).not.toHaveBeenCalled()
+      })
+
+      test('throws NoSuchElementError when the bundler has never seen the user operation', async () => {
+        getUserOperationByHashMock.mockResolvedValue(null)
+
+        await expect(account.getTransaction(DUMMY_USER_OP_HASH)).rejects.toThrow(NoSuchElementError)
+        expect(evmGetTransactionMock).not.toHaveBeenCalled()
+      })
+
+      test('throws NoSuchElementError when the bundling tx can no longer be found', async () => {
+        getUserOperationByHashMock.mockResolvedValue({ transactionHash: DUMMY_TX_HASH })
+        getUserOperationReceiptMock.mockResolvedValue(DUMMY_USER_OP_RECEIPT)
+        evmGetTransactionMock.mockRejectedValue(new NoSuchElementError(`No transaction found for '${DUMMY_TX_HASH}'.`))
+
+        await expect(account.getTransaction(DUMMY_USER_OP_HASH)).rejects.toThrow(NoSuchElementError)
       })
     })
 

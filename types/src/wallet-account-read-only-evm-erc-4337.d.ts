@@ -6,9 +6,25 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
      *
      * @param {string} owner - The safe owner's address.
      * @param {Pick<EvmErc4337WalletConfig, 'safeModulesVersion' | 'onChainIdentifier'>} config - The safe configuration.
+     * @throws {ValueError} If `owner` is not a well-formed evm address.
      * @returns {string} The Safe address.
      */
     static predictSafeAddress(owner: string, config: Pick<EvmErc4337WalletConfig, "safeModulesVersion" | "onChainIdentifier">): string;
+    /**
+     * Creates a read-only account for a safe whose address is already known.
+     *
+     * The address is used as the account's own address, so balances, allowances and quotes resolve against that
+     * safe. Its owner is unknown to the account: {@link verify} and {@link verifyTypedData} throw, and the safe must
+     * already be deployed for {@link quoteSendTransaction} and {@link quoteTransfer}.
+     *
+     * @param {string} safeAddress - The safe's evm address. Normalized to its checksummed form.
+     * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee' | 'transactionMaxFee'>} config - The configuration object.
+     * @throws {ValueError} If `safeAddress` is not a well-formed evm address.
+     * @throws {ValueError} If the `provider` option is set to an empty array.
+     * @throws {ConfigurationError} If `config.safeModulesVersion` is not in the supported set.
+     * @returns {WalletAccountReadOnlyEvmErc4337} A read-only account whose address is `safeAddress`.
+     */
+    static fromSafeAddress(safeAddress: string, config: Omit<EvmErc4337WalletConfig, "transferMaxFee" | "transactionMaxFee">): WalletAccountReadOnlyEvmErc4337;
     /**
      * Builds the init code overrides from the wallet configuration.
      *
@@ -20,8 +36,13 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
     /**
      * Creates a new read-only evm [erc-4337](https://www.erc4337.io/docs) wallet account.
      *
-     * @param {string} address - The evm account's address.
+     * `address` is the safe owner's address; the account's own address is the counterfactual safe address derived
+     * from it. To read a safe whose address is already known, use {@link fromSafeAddress}.
+     *
+     * @param {string} address - The safe owner's evm address.
      * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee'>} config - The configuration object.
+     * @throws {ValueError} If `address` is not a well-formed evm address.
+     * @throws {ValueError} If the `provider` option is set to an empty array.
      * @throws {ConfigurationError} If `config.safeModulesVersion` is not in the supported set.
      */
     constructor(address: string, config: Omit<EvmErc4337WalletConfig, "transferMaxFee" | "transactionMaxFee">);
@@ -58,8 +79,13 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
      * @type {bigint | undefined}
      */
     protected _chainId: bigint | undefined;
-    /** @private */
-    private _ownerAccountAddress;
+    /**
+     * The safe owner's address, or `undefined` when the account was created from a safe address.
+     *
+     * @protected
+     * @type {string | undefined}
+     */
+    protected _ownerAccountAddress: string | undefined;
     /**
      * Returns the account's eth balance.
      *
@@ -100,7 +126,9 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
      * @param {Partial<EvmErc4337WalletPaymasterTokenConfig | EvmErc4337WalletSponsorshipPolicyConfig | EvmErc4337WalletNativeCoinsConfig>} [config] - If set, overrides the given configuration options.
      * @returns {Promise<Omit<TransactionResult, 'hash'>>} The transaction's quotes.
      * @throws {ConfigurationError} If the override `config` is invalid or has missing required fields.
-     * @throws {Error} If the token paymaster reports AA50 (account does not hold the paymaster token).
+     * @throws {ConfigurationError} If, in token mode, the configured `paymasterAddress` does not match the paymaster address returned by the paymaster RPC. This guards against the auto-generated ERC-20 approval targeting an unexpected paymaster contract.
+     * @throws {TransactionError} If the token paymaster reports AA50 (account does not hold the paymaster token).
+     * @throws {ConfigurationError} If the account was created from a safe address that is not deployed.
      */
     quoteSendTransaction(tx: EvmErc4337Transaction | EvmErc4337Transaction[], config?: Partial<EvmErc4337WalletPaymasterTokenConfig | EvmErc4337WalletSponsorshipPolicyConfig | EvmErc4337WalletNativeCoinsConfig>): Promise<Omit<TransactionResult, "hash">>;
     /**
@@ -114,16 +142,43 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
      * @param {EvmErc4337GasOverrides} [txOverrides] - If set, applies these UserOperationV7 gas/fee overrides to the underlying transaction.
      * @returns {Promise<Omit<TransferResult, 'hash'>>} The transfer's quotes.
      * @throws {ConfigurationError} If the override `config` is invalid or has missing required fields.
-     * @throws {Error} If the token paymaster reports AA50 (account does not hold the paymaster token).
+     * @throws {ConfigurationError} If, in token mode, the configured `paymasterAddress` does not match the paymaster address returned by the paymaster RPC. This guards against the auto-generated ERC-20 approval targeting an unexpected paymaster contract.
+     * @throws {TransactionError} If the token paymaster reports AA50 (account does not hold the paymaster token).
+     * @throws {ConfigurationError} If the account was created from a safe address that is not deployed.
      */
     quoteTransfer(options: TransferOptions, config?: Partial<EvmErc4337WalletPaymasterTokenConfig | EvmErc4337WalletSponsorshipPolicyConfig | EvmErc4337WalletNativeCoinsConfig>, txOverrides?: EvmErc4337GasOverrides): Promise<Omit<TransferResult, "hash">>;
     /**
      * Returns a transaction's receipt.
      *
+     * @deprecated Use {@link getTransaction} instead, which returns a normalized, finality-based receipt. The raw ethers receipt and the user operation receipt remain available on its `receipt` and `userOperationReceipt` properties.
      * @param {string} hash - The user operation hash.
      * @returns {Promise<EvmTransactionReceipt | null>} – The receipt, or null if the transaction has not been included in a block yet.
      */
     getTransactionReceipt(hash: string): Promise<EvmTransactionReceipt | null>;
+    /**
+     * Returns a normalized, finality-based receipt for a user operation. Finality and confirmations come from the bundling transaction; `success` and `fee` come from the user operation.
+     *
+     * @param {string} hash - The user operation hash.
+     * @returns {Promise<TransactionReceipt & EvmErc4337TransactionDetails>} The normalized receipt.
+     * @throws {ValueError} If the hash is not a valid user operation hash.
+     * @throws {NoSuchElementError} If no user operation has been found for the given hash.
+     */
+    getTransaction(hash: string): Promise<TransactionReceipt & EvmErc4337TransactionDetails>;
+    /**
+     * Blocks until a user operation reaches a terminal state (the requested finality target or `dropped`), or times out.
+     *
+     * @param {string} hash - The user operation hash.
+     * @param {WaitForTransactionOptions} [options] - The wait options.
+     * @returns {Promise<TransactionReceipt & EvmErc4337TransactionDetails>} The terminal receipt: the finality target reached (inspect `success` to tell success from revert), or `dropped`.
+     * @throws {TimeoutError} If the target is not reached before the timeout.
+     */
+    waitForTransaction(hash: string, options?: WaitForTransactionOptions): Promise<TransactionReceipt & EvmErc4337TransactionDetails>;
+    /**
+     * Overrides the base default to allow for slower ERC-4337 bundling, inclusion, and confirmation.
+     *
+     * @type {number}
+     */
+    get defaultWaitTimeout(): number;
     /**
      * Returns a user operation's receipt.
      *
@@ -144,6 +199,7 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
      *
      * @param {string} message - The original message.
      * @param {string} signature - The signature to verify.
+     * @throws {UnsupportedOperationError} If the account was created from a safe address, whose owner is unknown.
      * @returns {Promise<boolean>} True if the signature is valid.
      */
     verify(message: string, signature: string): Promise<boolean>;
@@ -152,6 +208,7 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
      *
      * @param {TypedData} typedData - The typed data to verify.
      * @param {string} signature - The signature to verify.
+     * @throws {UnsupportedOperationError} If the account was created from a safe address, whose owner is unknown.
      * @returns {Promise<boolean>} True if the signature is valid.
      */
     verifyTypedData(typedData: TypedData, signature: string): Promise<boolean>;
@@ -169,9 +226,22 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
      *
      * @protected
      * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee'>} [config] - The wallet configuration. Defaults to the instance configuration.
+     * @throws {ConfigurationError} If the account was created from a safe address that is not deployed.
      * @returns {Promise<SafeAccountV0_3_0>} The safe account instance.
      */
     protected _getSmartAccount(config?: Omit<EvmErc4337WalletConfig, "transferMaxFee" | "transactionMaxFee">): Promise<import('abstractionkit').SafeAccountV0_3_0>;
+    /**
+     * Builds the RPC transport for an AbstractionKit client (Bundler / Erc7677Paymaster).
+     *
+     * When `headers` are provided, the transport injects them on every request (e.g.
+     * `{ Authorization: 'Bearer <key>' }` for authenticated bundlers/paymasters).
+     *
+     * @protected
+     * @param {string} url - The bundler or paymaster RPC url.
+     * @param {Record<string, string>} [headers] - Optional HTTP headers to inject on every request.
+     * @returns {HttpTransport} An HttpTransport for the url, carrying the headers when set.
+     */
+    protected static _rpcTarget(url: string, headers?: Record<string, string>): HttpTransport;
     /**
      * Returns an AbstractionKit Bundler for querying UserOperations.
      *
@@ -200,7 +270,7 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
      * @protected
      * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee'>} [config] - The configuration object.
      * @returns {Eip1193Provider} A wrapped Eip1193Provider instance.
-     * @throws {Error} If the `provider` option is set to an empty array.
+     * @throws {ValueError} If the `provider` option is set to an empty array.
      */
     protected _createFailoverProvider (config?: Omit<EvmErc4337WalletConfig, "transferMaxFee" | "transactionMaxFee">): Eip1193Provider
     /** @private */
@@ -213,6 +283,7 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
      * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee'>} config - The wallet configuration.
      * @param {EvmErc4337GasOverrides & Nonce} [txOverrides] - Optional UserOperationV7 gas overrides extracted from the input transaction(s), plus an optional explicit lane `nonce`.
      * @returns {Promise<BuiltUserOperation>} The built operation, signing context, and (in token mode) the paymaster quote.
+     * @throws {ConfigurationError} If the account was created from a safe address that is not deployed.
      */
     protected _buildUserOperation(calls: import('abstractionkit').MetaTransaction[], config: Omit<EvmErc4337WalletConfig, "transferMaxFee" | "transactionMaxFee">, txOverrides?: EvmErc4337GasOverrides & Nonce): Promise<BuiltUserOperation>;
     /**
@@ -239,7 +310,7 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
      * @param {EvmErc4337Transaction[]} txs - The EVM transactions to include in the UserOperation.
      * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee'>} config - The wallet configuration to use for the build.
      * @returns {Promise<BuiltUserOperation & Omit<TransactionResult, 'hash'>>} The built operation plus its raw fee (no tolerance buffer applied).
-     * @throws {Error} If the token paymaster reports AA50 (account does not hold the paymaster token).
+     * @throws {TransactionError} If the token paymaster reports AA50 (account does not hold the paymaster token).
      */
     protected _getUserOperationGasCost(txs: EvmErc4337Transaction[], config: Omit<EvmErc4337WalletConfig, "transferMaxFee" | "transactionMaxFee">): Promise<BuiltUserOperation & Omit<TransactionResult, "hash">>;
 }
@@ -250,6 +321,25 @@ export type TransferResult = import("@tetherto/wdk-wallet-evm").TransferResult;
 export type EvmTransactionReceipt = import("@tetherto/wdk-wallet-evm").EvmTransactionReceipt;
 export type TypedData = import("@tetherto/wdk-wallet-evm").TypedData;
 export type UserOperationReceipt = import('abstractionkit').UserOperationReceiptResult;
+export type TransactionReceipt = import("@tetherto/wdk-wallet").TransactionReceipt;
+export type WaitForTransactionOptions = import("@tetherto/wdk-wallet").WaitForTransactionOptions;
+/**
+ * The ERC-4337-specific fields added to a normalized transaction receipt.
+ */
+export type EvmErc4337TransactionDetails = {
+    /**
+     * - The number of confirmations (0 while pending or dropped).
+     */
+    confirmations: number;
+    /**
+     * - The native ethers receipt, or null while the user operation is pending or dropped.
+     */
+    receipt: EvmTransactionReceipt | null;
+    /**
+     * - The user operation receipt, or null while pending or unavailable.
+     */
+    userOperationReceipt: UserOperationReceipt | null;
+};
 export type EvmErc4337Transaction = {
     /**
      * - The call's recipient.
@@ -382,6 +472,10 @@ export type EvmErc4337WalletCommonConfig = {
      */
     bundlerUrl: string;
     /**
+     * - Optional HTTP headers sent on every request to the bundler (e.g. `{ Authorization: 'Bearer <key>' }`). Use for bundlers that require authentication.
+     */
+    bundlerHeaders?: Record<string, string>;
+    /**
      * - Version of the Safe 4337 module set to deploy with the account (e.g. "0.3.0"). Determines the module addresses used in init code.
      */
     safeModulesVersion: string;
@@ -411,6 +505,10 @@ export type EvmErc4337WalletPaymasterTokenConfig = {
      * - The url of the paymaster service.
      */
     paymasterUrl: string;
+    /**
+     * - Optional HTTP headers sent on every request to the paymaster (e.g. `{ Authorization: 'Bearer <key>' }`). Use for paymasters that require authentication.
+     */
+    paymasterHeaders?: Record<string, string>;
     /**
      * - The address of the paymaster smart contract.
      */
@@ -444,6 +542,10 @@ export type EvmErc4337WalletSponsorshipPolicyConfig = {
      */
     paymasterUrl: string;
     /**
+     * - Optional HTTP headers sent on every request to the paymaster (e.g. `{ Authorization: 'Bearer <key>' }`). Use for paymasters that require authentication.
+     */
+    paymasterHeaders?: Record<string, string>;
+    /**
      * - Identifier of the paymaster sponsorship policy to apply (provider-specific). Optional; some paymasters infer the policy from the project key.
      */
     sponsorshipPolicyId?: string;
@@ -469,3 +571,4 @@ export type EvmErc4337WalletNativeCoinsConfig = {
 export type EvmErc4337WalletConfig = EvmErc4337WalletCommonConfig & (EvmErc4337WalletPaymasterTokenConfig | EvmErc4337WalletSponsorshipPolicyConfig | EvmErc4337WalletNativeCoinsConfig);
 import { WalletAccountReadOnly } from '@tetherto/wdk-wallet';
 import { Bundler } from 'abstractionkit';
+import { HttpTransport } from 'abstractionkit';

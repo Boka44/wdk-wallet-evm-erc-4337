@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, jest, test } from '@jest/globals'
 import * as bip39 from 'bip39'
 import { Contract, keccak256, toUtf8Bytes } from 'ethers'
+import { MaximumFeeExceededError, ProviderRequiredError, TransactionErrorReason, UnsupportedOperationError, ValueError } from '@tetherto/wdk-wallet'
 
 const actualWalletEvm = await import('@tetherto/wdk-wallet-evm')
 const actualAk = await import('abstractionkit')
@@ -167,6 +168,8 @@ describe('@tetherto/wdk-wallet-evm-erc-4337', () => {
 
       test('should throw if the seed phrase is invalid', () => {
         expect(() => { new WalletAccountEvmErc4337(INVALID_SEED_PHRASE, "0'/0/0", SPONSORED_CONFIG) })
+          .toThrow(ValueError)
+        expect(() => { new WalletAccountEvmErc4337(INVALID_SEED_PHRASE, "0'/0/0", SPONSORED_CONFIG) })
           .toThrow('The seed phrase is invalid.')
       })
 
@@ -178,6 +181,17 @@ describe('@tetherto/wdk-wallet-evm-erc-4337', () => {
       test('should throw if the safe modules version is not supported', () => {
         expect(() => new WalletAccountEvmErc4337(SEED_PHRASE, "0'/0/0", { ...SPONSORED_CONFIG, safeModulesVersion: '0.2.0' }))
           .toThrow(new ConfigurationError('Unsupported safe modules version: 0.2.0'))
+      })
+    })
+
+    describe('fromSafeAddress', () => {
+      test('should throw because a writable account cannot be created from a safe address', () => {
+        const SAFE_ADDRESS = '0xFE0847a52f1C75A01B06cFC636c87683E72a6029'
+
+        expect(() => WalletAccountEvmErc4337.fromSafeAddress(SAFE_ADDRESS, SPONSORED_CONFIG))
+          .toThrow(expect.objectContaining({ name: 'UnsupportedOperationError' }))
+        expect(() => WalletAccountEvmErc4337.fromSafeAddress(SAFE_ADDRESS, SPONSORED_CONFIG))
+          .toThrow(new UnsupportedOperationError('fromSafeAddress(safeAddress, config)'))
       })
     })
 
@@ -244,7 +258,7 @@ describe('@tetherto/wdk-wallet-evm-erc-4337', () => {
         expect(createPaymasterUserOperationMock).toHaveBeenCalledWith(
           SafeAccountMock.mock.results[0].value,
           { ...DUMMY_USER_OP },
-          PAYMASTER_TOKEN_CONFIG.bundlerUrl,
+          new actualAk.HttpTransport(PAYMASTER_TOKEN_CONFIG.bundlerUrl, {}),
           { token: USDT_MAINNET_ADDRESS },
           { entrypoint: actualAk.ENTRYPOINT_V7 }
         )
@@ -326,8 +340,10 @@ describe('@tetherto/wdk-wallet-evm-erc-4337', () => {
           transactionMaxFee: 0n
         })
 
-        await expect(pmAccount.sendTransaction(TRANSACTION))
-          .rejects.toThrow('Exceeded maximum fee cost for transaction operation.')
+        const promise = pmAccount.sendTransaction(TRANSACTION)
+
+        await expect(promise).rejects.toThrow(MaximumFeeExceededError)
+        await expect(promise).rejects.toThrow('Exceeded maximum fee cost for transaction operation.')
 
         expect(sendUserOperationMock).not.toHaveBeenCalled()
       })
@@ -397,12 +413,56 @@ describe('@tetherto/wdk-wallet-evm-erc-4337', () => {
       })
 
       test('should reframe AA50 errors from the bundler as a paymaster funds error', async () => {
-        sendUserOperationMock.mockRejectedValue(
-          new actualAk.AbstractionKitError('BUNDLER_ERROR', 'AA50: paymaster deposit too low')
-        )
+        const bundlerError = new actualAk.AbstractionKitError('BUNDLER_ERROR', 'AA50: paymaster deposit too low')
+        sendUserOperationMock.mockRejectedValue(bundlerError)
 
-        await expect(account.sendTransaction(TRANSACTION))
-          .rejects.toThrow('Not enough funds on the safe account to repay the paymaster.')
+        const promise = account.sendTransaction(TRANSACTION)
+
+        await expect(promise).rejects.toThrow('Not enough funds on the safe account to repay the paymaster.')
+        await expect(promise).rejects.toMatchObject({ reason: TransactionErrorReason.INSUFFICIENT_BALANCE, cause: bundlerError })
+      })
+
+      test('should reframe AA50 errors when broadcasting an already-signed user operation', async () => {
+        const bundlerError = new actualAk.AbstractionKitError('BUNDLER_ERROR', 'AA50: paymaster deposit too low')
+        sendUserOperationMock.mockRejectedValue(bundlerError)
+
+        const promise = account.sendTransaction({ ...DUMMY_USER_OP, signature: DUMMY_OP_SIGNATURE })
+
+        await expect(promise).rejects.toThrow('Not enough funds on the safe account to repay the paymaster.')
+        await expect(promise).rejects.toMatchObject({ reason: TransactionErrorReason.INSUFFICIENT_BALANCE, cause: bundlerError })
+      })
+
+      test('should reframe AA50 errors identified only by aaCode, with no AA50 substring in the message', async () => {
+        const bundlerError = new actualAk.AbstractionKitError('BUNDLER_ERROR', 'bundler eth_sendUserOperation rpc call failed', { aaCode: 'AA50' })
+        sendUserOperationMock.mockRejectedValue(bundlerError)
+
+        const promise = account.sendTransaction(TRANSACTION)
+
+        await expect(promise).rejects.toThrow('Not enough funds on the safe account to repay the paymaster.')
+        await expect(promise).rejects.toMatchObject({ reason: TransactionErrorReason.INSUFFICIENT_BALANCE, cause: bundlerError })
+      })
+
+      test('should reframe AA50 errors identified only by aaCode when broadcasting an already-signed user operation', async () => {
+        const bundlerError = new actualAk.AbstractionKitError('BUNDLER_ERROR', 'bundler eth_sendUserOperation rpc call failed', { aaCode: 'AA50' })
+        sendUserOperationMock.mockRejectedValue(bundlerError)
+
+        const promise = account.sendTransaction({ ...DUMMY_USER_OP, signature: DUMMY_OP_SIGNATURE })
+
+        await expect(promise).rejects.toThrow('Not enough funds on the safe account to repay the paymaster.')
+        await expect(promise).rejects.toMatchObject({ reason: TransactionErrorReason.INSUFFICIENT_BALANCE, cause: bundlerError })
+      })
+
+      test('should reframe AA50 errors surfaced while building the user operation', async () => {
+        const paymasterError = new actualAk.AbstractionKitError('SIMULATE_PAYMASTER_VALIDATION', 'AA50: paymaster deposit too low')
+        createPaymasterUserOperationMock.mockRejectedValue(paymasterError)
+
+        const pmAccount = new WalletAccountEvmErc4337(SEED_PHRASE, "0'/0/0", PAYMASTER_TOKEN_CONFIG)
+
+        const promise = pmAccount.sendTransaction(TRANSACTION)
+
+        await expect(promise).rejects.toThrow('Not enough funds on the safe account to repay the paymaster.')
+        await expect(promise).rejects.toMatchObject({ reason: TransactionErrorReason.INSUFFICIENT_BALANCE, cause: paymasterError })
+        expect(sendUserOperationMock).not.toHaveBeenCalled()
       })
     })
 
@@ -471,14 +531,19 @@ describe('@tetherto/wdk-wallet-evm-erc-4337', () => {
       })
 
       test('should reject a bigint nonceKey above the uint192 range', async () => {
-        await expect(account.sendTransaction(TX, { nonceKey: MAX_UINT192 + 1n }))
-          .rejects.toThrow('nonceKey must be within the uint192 range (0 to 2^192 - 1).')
+        const promise = account.sendTransaction(TX, { nonceKey: MAX_UINT192 + 1n })
+
+        await expect(promise).rejects.toThrow(ValueError)
+        await expect(promise).rejects.toThrow('nonceKey must be within the uint192 range (0 to 2^192 - 1).')
+
         expect(fetchAccountNonceMock).not.toHaveBeenCalled()
       })
 
       test('should reject a negative bigint nonceKey', async () => {
-        await expect(account.sendTransaction(TX, { nonceKey: -1n }))
-          .rejects.toThrow('nonceKey must be within the uint192 range (0 to 2^192 - 1).')
+        const promise = account.sendTransaction(TX, { nonceKey: -1n })
+
+        await expect(promise).rejects.toThrow(ValueError)
+        await expect(promise).rejects.toThrow('nonceKey must be within the uint192 range (0 to 2^192 - 1).')
       })
     })
 
@@ -511,13 +576,27 @@ describe('@tetherto/wdk-wallet-evm-erc-4337', () => {
           transactionMaxFee: 0n
         })
 
-        await expect(pmAccount.signTransaction(TRANSACTION))
-          .rejects.toThrow('Exceeded maximum fee cost for transaction operation.')
+        const promise = pmAccount.signTransaction(TRANSACTION)
+
+        await expect(promise).rejects.toThrow(MaximumFeeExceededError)
+        await expect(promise).rejects.toThrow('Exceeded maximum fee cost for transaction operation.')
       })
 
       test('should re-validate the merged config when a per-call override is provided', async () => {
         await expect(account.signTransaction(TRANSACTION, { isSponsored: false }))
           .rejects.toThrow('Missing required paymaster token configuration fields: paymasterAddress, paymasterToken.')
+      })
+
+      test('should reframe AA50 errors surfaced while building the user operation', async () => {
+        const paymasterError = new actualAk.AbstractionKitError('SIMULATE_PAYMASTER_VALIDATION', 'AA50: paymaster deposit too low')
+        createPaymasterUserOperationMock.mockRejectedValue(paymasterError)
+
+        const pmAccount = new WalletAccountEvmErc4337(SEED_PHRASE, "0'/0/0", PAYMASTER_TOKEN_CONFIG)
+
+        const promise = pmAccount.signTransaction(TRANSACTION)
+
+        await expect(promise).rejects.toThrow('Not enough funds on the safe account to repay the paymaster.')
+        await expect(promise).rejects.toMatchObject({ reason: TransactionErrorReason.INSUFFICIENT_BALANCE, cause: paymasterError })
       })
     })
 
@@ -558,13 +637,16 @@ describe('@tetherto/wdk-wallet-evm-erc-4337', () => {
           transferMaxFee: 0n
         })
 
-        await expect(pmAccount.transfer(TRANSFER))
-          .rejects.toThrow('Exceeded maximum fee cost for transfer operation.')
+        const promise = pmAccount.transfer(TRANSFER)
+
+        await expect(promise).rejects.toThrow(MaximumFeeExceededError)
+        await expect(promise).rejects.toThrow('Exceeded maximum fee cost for transfer operation.')
 
         expect(sendUserOperationMock).not.toHaveBeenCalled()
       })
 
-      test('should throw if the fee equals the transfer max fee configuration', async () => {
+      test('should allow a fee exactly equal to the transfer max fee configuration', async () => {
+        sendUserOperationMock.mockResolvedValue(DUMMY_USER_OP_HASH)
         createPaymasterUserOperationMock.mockResolvedValue({
           userOperation: { ...DUMMY_USER_OP },
           tokenQuote: { tokenCost: 500_000n }
@@ -575,15 +657,28 @@ describe('@tetherto/wdk-wallet-evm-erc-4337', () => {
           transferMaxFee: 600_000n
         })
 
-        await expect(pmAccount.transfer(TRANSFER))
-          .rejects.toThrow('Exceeded maximum fee cost for transfer operation.')
+        const { hash, fee } = await pmAccount.transfer(TRANSFER)
 
-        expect(sendUserOperationMock).not.toHaveBeenCalled()
+        expect(hash).toBe(DUMMY_USER_OP_HASH)
+        expect(fee).toBe(600_000n)
       })
 
       test('should re-validate the merged config when a per-call override is provided', async () => {
         await expect(account.transfer(TRANSFER, { isSponsored: false }))
           .rejects.toThrow('Missing required paymaster token configuration fields: paymasterAddress, paymasterToken.')
+      })
+
+      test('should reframe AA50 errors surfaced while building the user operation', async () => {
+        const paymasterError = new actualAk.AbstractionKitError('SIMULATE_PAYMASTER_VALIDATION', 'AA50: paymaster deposit too low')
+        createPaymasterUserOperationMock.mockRejectedValue(paymasterError)
+
+        const pmAccount = new WalletAccountEvmErc4337(SEED_PHRASE, "0'/0/0", PAYMASTER_TOKEN_CONFIG)
+
+        const promise = pmAccount.transfer(TRANSFER)
+
+        await expect(promise).rejects.toThrow('Not enough funds on the safe account to repay the paymaster.')
+        await expect(promise).rejects.toMatchObject({ reason: TransactionErrorReason.INSUFFICIENT_BALANCE, cause: paymasterError })
+        expect(sendUserOperationMock).not.toHaveBeenCalled()
       })
     })
 
@@ -594,8 +689,10 @@ describe('@tetherto/wdk-wallet-evm-erc-4337', () => {
       test('should throw if approving non-zero USDT on mainnet when allowance is non-zero', async () => {
         getAllowanceMock.mockResolvedValue(1n)
 
-        await expect(account.approve({ token: USDT_MAINNET_ADDRESS, spender: SPENDER, amount: AMOUNT }))
-          .rejects.toThrow('USDT requires the current allowance to be reset to 0 before setting a new non-zero value.')
+        const promise = account.approve({ token: USDT_MAINNET_ADDRESS, spender: SPENDER, amount: AMOUNT })
+
+        await expect(promise).rejects.toThrow(ValueError)
+        await expect(promise).rejects.toThrow('USDT requires the current allowance to be reset to 0 before setting a new non-zero value.')
 
         expect(getAllowanceMock).toHaveBeenCalledWith(USDT_MAINNET_ADDRESS, SPENDER)
       })
@@ -690,8 +787,45 @@ describe('@tetherto/wdk-wallet-evm-erc-4337', () => {
           provider: undefined
         })
 
-        await expect(offlineAccount.approve({ token: USDT_MAINNET_ADDRESS, spender: SPENDER, amount: AMOUNT }))
-          .rejects.toThrow('The wallet must be connected to a provider to approve funds.')
+        const promise = offlineAccount.approve({ token: USDT_MAINNET_ADDRESS, spender: SPENDER, amount: AMOUNT })
+
+        await expect(promise).rejects.toThrow(ProviderRequiredError)
+        await expect(promise).rejects.toThrow('The wallet must be connected to a provider to approve funds.')
+      })
+    })
+
+    describe('bundler auth headers', () => {
+      const BUNDLER_HEADERS = { Authorization: 'Bearer bundler-key' }
+
+      test('should wrap the bundler url in a transport carrying the configured headers', async () => {
+        getUserOperationReceiptMock.mockResolvedValue(null)
+
+        const headersAccount = new WalletAccountEvmErc4337(SEED_PHRASE, "0'/0/0", {
+          ...SPONSORED_CONFIG,
+          bundlerHeaders: BUNDLER_HEADERS
+        })
+        const receipt = await headersAccount.getUserOperationReceipt(DUMMY_USER_OP_HASH)
+        headersAccount.dispose()
+
+        expect(receipt).toBe(null)
+        expect(BundlerMock).toHaveBeenCalledTimes(1)
+        const [transport] = BundlerMock.mock.calls[0]
+        expect(transport).toBeInstanceOf(actualAk.HttpTransport)
+        expect(transport.url).toBe(SPONSORED_CONFIG.bundlerUrl)
+        expect(transport.options).toEqual({ headers: BUNDLER_HEADERS })
+        expect(getUserOperationReceiptMock).toHaveBeenCalledWith(DUMMY_USER_OP_HASH)
+      })
+
+      test('should create the bundler transport without headers when bundlerHeaders is not configured', async () => {
+        getUserOperationReceiptMock.mockResolvedValue(null)
+
+        await account.getUserOperationReceipt(DUMMY_USER_OP_HASH)
+
+        expect(BundlerMock).toHaveBeenCalledTimes(1)
+        const [transport] = BundlerMock.mock.calls[0]
+        expect(transport).toBeInstanceOf(actualAk.HttpTransport)
+        expect(transport.url).toBe(SPONSORED_CONFIG.bundlerUrl)
+        expect(transport.options).toEqual({})
       })
     })
 
