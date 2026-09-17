@@ -544,7 +544,10 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
       throw new UnsupportedOperationError('verify(message, signature)')
     }
 
-    const evmReadOnlyAccount = new WalletAccountReadOnlyEvm(this._ownerAccountAddress, this._config)
+    const evmReadOnlyAccount = new WalletAccountReadOnlyEvm(this._ownerAccountAddress, {
+      ...this._config,
+      provider: this._provider
+    })
     return await evmReadOnlyAccount.verify(message, signature)
   }
 
@@ -561,7 +564,10 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
       throw new UnsupportedOperationError('verifyTypedData(typedData, signature)')
     }
 
-    const evmReadOnlyAccount = new WalletAccountReadOnlyEvm(this._ownerAccountAddress, this._config)
+    const evmReadOnlyAccount = new WalletAccountReadOnlyEvm(this._ownerAccountAddress, {
+      ...this._config,
+      provider: this._provider
+    })
 
     return await evmReadOnlyAccount.verifyTypedData(typedData, signature)
   }
@@ -753,7 +759,10 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
   async _getEvmReadOnlyAccount () {
     if (!this._evmReadOnlyAccount) {
       const address = await this.getAddress()
-      this._evmReadOnlyAccount = new WalletAccountReadOnlyEvm(address, this._config)
+      this._evmReadOnlyAccount = new WalletAccountReadOnlyEvm(address, {
+        ...this._config,
+        provider: this._provider
+      })
     }
 
     return this._evmReadOnlyAccount
