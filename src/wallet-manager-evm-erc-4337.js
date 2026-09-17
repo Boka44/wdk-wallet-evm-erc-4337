@@ -107,15 +107,23 @@ export default class WalletManagerEvmErc4337 extends WalletManager {
    */
   async getAccountByPath (path) {
     if (!this._accounts[path]) {
-      const account = new WalletAccountEvmErc4337(this.seed, path, {
-        ...this._config,
-        provider: WalletManagerEvmErc4337._asEip1193(this._provider)
-      })
+      const account = new WalletAccountEvmErc4337(this.seed, path, this._accountConfig())
 
       this._accounts[path] = account
     }
 
     return this._accounts[path]
+  }
+
+  /**
+   * Builds the account config, injecting the manager's shared provider so accounts reuse it
+   * instead of opening their own.
+   *
+   * @private
+   * @returns {EvmErc4337WalletConfig} The account configuration.
+   */
+  _accountConfig () {
+    return { ...this._config, provider: WalletManagerEvmErc4337._asEip1193(this._provider) }
   }
 
   /**
