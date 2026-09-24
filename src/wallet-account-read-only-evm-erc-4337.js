@@ -267,7 +267,7 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
      * @protected
      * @type {Eip1193Provider | undefined}
      */
-    this._eip1193Provider = this._buildEip1193Provider(this._config, this._provider)
+    this._eip1193Provider = WalletAccountReadOnlyEvmErc4337._buildEip1193Provider(this._provider, this._config)
 
     /** @private */
     this._deployedSmartAccount = undefined
@@ -742,11 +742,11 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
    * same underlying connection as {@link _provider}.
    *
    * @protected
-   * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee' | 'transactionMaxFee'>} config - The configuration object.
    * @param {Provider} [provider] - The shared ethers provider built from `config`.
+   * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee' | 'transactionMaxFee'>} config - The configuration object.
    * @returns {Eip1193Provider | undefined} The EIP-1193 provider, or undefined if none is configured.
    */
-  _buildEip1193Provider (config, provider) {
+  static _buildEip1193Provider (provider, config) {
     if (!provider) {
       return undefined
     }

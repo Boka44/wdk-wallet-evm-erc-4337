@@ -275,11 +275,11 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
      * reused directly; otherwise the shared ethers provider is adapted so `request` forwards to `send`.
      *
      * @protected
-     * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee'>} config - The configuration object.
      * @param {Provider} [provider] - The shared ethers provider built from `config`.
+     * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee'>} config - The configuration object.
      * @returns {Eip1193Provider | undefined} The EIP-1193 provider, or undefined if none is configured.
      */
-    protected _buildEip1193Provider (config: Omit<EvmErc4337WalletConfig, "transferMaxFee" | "transactionMaxFee">, provider?: Provider): Eip1193Provider | undefined
+    protected static _buildEip1193Provider (provider: Provider | undefined, config: Omit<EvmErc4337WalletConfig, "transferMaxFee" | "transactionMaxFee">): Eip1193Provider | undefined
     /**
      * Builds the single shared ethers provider from the configuration, reusing an already-built
      * provider as-is and delegating construction to wdk-wallet-evm.
