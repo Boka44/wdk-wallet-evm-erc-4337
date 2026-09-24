@@ -59,17 +59,17 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
      * so accounts do not open their own connection.
      *
      * @protected
-     * @type {Provider | undefined}
+     * @type {Provider}
      */
-    protected _provider: Provider | undefined;
+    protected _provider: Provider;
     /**
      * An EIP-1193 adapter over {@link _provider}, built once and used only where abstractionkit
      * (Safe4337Pack) requires the EIP-1193 interface. Reuses the same underlying connection.
      *
      * @protected
-     * @type {Eip1193Provider | undefined}
+     * @type {Eip1193Provider}
      */
-    protected _eip1193Provider: Eip1193Provider | undefined;
+    protected _eip1193Provider: Eip1193Provider;
     /**
      * Cached AbstractionKit bundler.
      *
@@ -275,21 +275,21 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
      * reused directly; otherwise the shared ethers provider is adapted so `request` forwards to `send`.
      *
      * @protected
-     * @param {Provider} [provider] - The shared ethers provider built from `config`.
+     * @param {Provider} provider - The shared ethers provider built from `config`.
      * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee'>} config - The configuration object.
-     * @returns {Eip1193Provider | undefined} The EIP-1193 provider, or undefined if none is configured.
+     * @returns {Eip1193Provider} The EIP-1193 provider that reuses the given connection.
      */
-    protected static _buildEip1193Provider (provider: Provider | undefined, config: Omit<EvmErc4337WalletConfig, "transferMaxFee" | "transactionMaxFee">): Eip1193Provider | undefined
+    protected static _buildEip1193Provider (provider: Provider, config: Omit<EvmErc4337WalletConfig, "transferMaxFee" | "transactionMaxFee">): Eip1193Provider
     /**
      * Builds the single shared ethers provider from the configuration, reusing an already-built
      * provider as-is and delegating construction to wdk-wallet-evm.
      *
      * @protected
      * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee'>} [config] - The configuration object.
-     * @returns {Provider | undefined} The shared provider, or undefined if none is configured.
+     * @returns {Provider} The shared provider.
      * @throws {ValueError} If the `provider` option is set to an empty array.
      */
-    protected _buildProvider (config?: Omit<EvmErc4337WalletConfig, "transferMaxFee" | "transactionMaxFee">): Provider | undefined
+    protected _buildProvider (config?: Omit<EvmErc4337WalletConfig, "transferMaxFee" | "transactionMaxFee">): Provider
     /** @private */
     private _getEvmReadOnlyAccount;
     /**

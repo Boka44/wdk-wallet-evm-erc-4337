@@ -256,7 +256,7 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
      * so accounts do not open their own connection.
      *
      * @protected
-     * @type {Provider | undefined}
+     * @type {Provider}
      */
     this._provider = this._buildProvider(this._config)
 
@@ -265,7 +265,7 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
      * once and backed by the same underlying connection as {@link _provider}.
      *
      * @protected
-     * @type {Eip1193Provider | undefined}
+     * @type {Eip1193Provider}
      */
     this._eip1193Provider = WalletAccountReadOnlyEvmErc4337._buildEip1193Provider(this._provider, this._config)
 
@@ -742,15 +742,11 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
    * same underlying connection as {@link _provider}.
    *
    * @protected
-   * @param {Provider} [provider] - The shared ethers provider built from `config`.
+   * @param {Provider} provider - The shared ethers provider built from `config`.
    * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee' | 'transactionMaxFee'>} config - The configuration object.
-   * @returns {Eip1193Provider | undefined} The EIP-1193 provider, or undefined if none is configured.
+   * @returns {Eip1193Provider} The EIP-1193 provider that reuses the given connection.
    */
   static _buildEip1193Provider (provider, config) {
-    if (!provider) {
-      return undefined
-    }
-
     const { provider: configured } = config
     const source = configured && typeof configured.request === 'function' ? configured : provider
 
@@ -765,7 +761,7 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
    *
    * @protected
    * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee' | 'transactionMaxFee'>} [config] - The configuration object.
-   * @returns {Provider | undefined} The shared provider, or undefined if none is configured.
+   * @returns {Provider} The shared provider.
    * @throws {ValueError} If the `provider` option is set to an empty array.
    */
   _buildProvider (config = this._config) {
