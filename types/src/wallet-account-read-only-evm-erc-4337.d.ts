@@ -59,17 +59,17 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
      * so accounts do not open their own connection.
      *
      * @protected
-     * @type {Provider | undefined}
+     * @type {Provider}
      */
-    protected _provider: Provider | undefined;
+    protected _provider: Provider;
     /**
      * An EIP-1193 adapter over {@link _provider}, built once and used only where abstractionkit
      * (Safe4337Pack) requires the EIP-1193 interface. Reuses the same underlying connection.
      *
      * @protected
-     * @type {Eip1193Provider | undefined}
+     * @type {Eip1193Provider}
      */
-    protected _eip1193Provider: Eip1193Provider | undefined;
+    protected _eip1193Provider: Eip1193Provider;
     /**
      * Cached AbstractionKit bundler.
      *
@@ -142,16 +142,15 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
      * The result is cached internally for up to 2 minutes. If `transfer` is called with the
      * same transaction within that window, the cached fee is reused without an additional RPC round-trip.
      *
-     * @param {TransferOptions} options - The transfer's options.
+     * @param {EvmErc4337TransferOptions} options - The transfer's options, including any UserOperationV7 gas/fee overrides to apply to the underlying transaction.
      * @param {Partial<EvmErc4337WalletPaymasterTokenConfig | EvmErc4337WalletSponsorshipPolicyConfig | EvmErc4337WalletNativeCoinsConfig>} [config] - If set, overrides the given configuration options.
-     * @param {EvmErc4337GasOverrides} [txOverrides] - If set, applies these UserOperationV7 gas/fee overrides to the underlying transaction.
      * @returns {Promise<Omit<TransferResult, 'hash'>>} The transfer's quotes.
      * @throws {ConfigurationError} If the override `config` is invalid or has missing required fields.
      * @throws {ConfigurationError} If, in token mode, the configured `paymasterAddress` does not match the paymaster address returned by the paymaster RPC. This guards against the auto-generated ERC-20 approval targeting an unexpected paymaster contract.
      * @throws {TransactionError} If the token paymaster reports AA50 (account does not hold the paymaster token).
      * @throws {ConfigurationError} If the account was created from a safe address that is not deployed.
      */
-    quoteTransfer(options: TransferOptions, config?: Partial<EvmErc4337WalletPaymasterTokenConfig | EvmErc4337WalletSponsorshipPolicyConfig | EvmErc4337WalletNativeCoinsConfig>, txOverrides?: EvmErc4337GasOverrides): Promise<Omit<TransferResult, "hash">>;
+    quoteTransfer(options: EvmErc4337TransferOptions, config?: Partial<EvmErc4337WalletPaymasterTokenConfig | EvmErc4337WalletSponsorshipPolicyConfig | EvmErc4337WalletNativeCoinsConfig>): Promise<Omit<TransferResult, "hash">>;
     /**
      * Returns a transaction's receipt.
      *
@@ -275,21 +274,21 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
      * reused directly; otherwise the shared ethers provider is adapted so `request` forwards to `send`.
      *
      * @protected
+     * @param {Provider} provider - The shared ethers provider built from `config`.
      * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee'>} config - The configuration object.
-     * @param {Provider} [provider] - The shared ethers provider built from `config`.
-     * @returns {Eip1193Provider | undefined} The EIP-1193 provider, or undefined if none is configured.
+     * @returns {Eip1193Provider} The EIP-1193 provider that reuses the given connection.
      */
-    protected _buildEip1193Provider (config: Omit<EvmErc4337WalletConfig, "transferMaxFee" | "transactionMaxFee">, provider?: Provider): Eip1193Provider | undefined
+    protected static _buildEip1193Provider (provider: Provider, config: Omit<EvmErc4337WalletConfig, "transferMaxFee" | "transactionMaxFee">): Eip1193Provider
     /**
      * Builds the single shared ethers provider from the configuration, reusing an already-built
      * provider as-is and delegating construction to wdk-wallet-evm.
      *
      * @protected
      * @param {Omit<EvmErc4337WalletConfig, 'transferMaxFee'>} [config] - The configuration object.
-     * @returns {Provider | undefined} The shared provider, or undefined if none is configured.
+     * @returns {Provider} The shared provider.
      * @throws {ValueError} If the `provider` option is set to an empty array.
      */
-    protected _buildProvider (config?: Omit<EvmErc4337WalletConfig, "transferMaxFee" | "transactionMaxFee">): Provider | undefined
+    protected _buildProvider (config?: Omit<EvmErc4337WalletConfig, "transferMaxFee" | "transactionMaxFee">): Provider
     /** @private */
     private _getEvmReadOnlyAccount;
     /**
@@ -304,16 +303,25 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
      */
     protected _buildUserOperation(calls: import('abstractionkit').MetaTransaction[], config: Omit<EvmErc4337WalletConfig, "transferMaxFee" | "transactionMaxFee">, txOverrides?: EvmErc4337GasOverrides & Nonce): Promise<BuiltUserOperation>;
     /**
-     * Extracts the optional UserOperationV7 gas overrides from a single transaction.
+     * Returns an evm transaction to execute the given token transfer, carrying any UserOperationV7
+     * gas overrides set on the options.
+     *
+     * @protected
+     * @param {EvmErc4337TransferOptions} options - The transfer's options, including any gas/fee overrides to carry onto the transaction.
+     * @returns {Promise<EvmErc4337Transaction>} The ERC-20 transfer call as an evm transaction, with the options' gas overrides applied.
+     */
+    protected static _getTransferTransaction(options: EvmErc4337TransferOptions): Promise<EvmErc4337Transaction>;
+    /**
+     * Extracts the optional UserOperationV7 gas overrides from a transaction or an options object.
      *
      * Only the fields actually consumed by AbstractionKit's `CreateUserOperationOverrides`
      * are picked. Numeric values are coerced to bigint.
      *
      * @protected
-     * @param {EvmErc4337Transaction} [tx] - The transaction to read overrides from.
-     * @returns {EvmErc4337GasOverrides} The overrides object (empty if `tx` is falsy or has no override fields).
+     * @param {EvmErc4337GasOverrides} [source] - The transaction or options object to read overrides from.
+     * @returns {EvmErc4337GasOverrides} The overrides object (empty if `source` is falsy or has no override fields).
      */
-    protected static _extractGasOverrides(tx?: EvmErc4337Transaction): EvmErc4337GasOverrides;
+    protected static _extractGasOverrides(source?: EvmErc4337GasOverrides): EvmErc4337GasOverrides;
     /**
      * Builds a UserOperation and returns its estimated gas cost.
      *
@@ -420,6 +428,10 @@ export type EvmErc4337GasOverrides = {
      */
     maxPriorityFeePerGas?: number | bigint;
 };
+/**
+ * The options of a token transfer, extended with the optional UserOperationV7 gas overrides.
+ */
+export type EvmErc4337TransferOptions = TransferOptions & EvmErc4337GasOverrides;
 /**
  * A single explicit UserOperationV7 `nonce`, combined with `EvmErc4337GasOverrides` for the build
  * step to place the operation in a specific two-dimensional nonce lane. The `nonce` is derived
