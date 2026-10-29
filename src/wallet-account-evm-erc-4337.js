@@ -16,9 +16,9 @@
 
 import { Contract, hexlify, keccak256, randomBytes, toUtf8Bytes } from 'ethers'
 
-import { MaximumFeeExceededError, ProviderRequiredError, TransactionError, TransactionErrorReason, UnsupportedOperationError, ValueError } from '@tetherto/wdk-wallet'
+import { InvalidSignerError, MaximumFeeExceededError, ProviderRequiredError, TransactionError, TransactionErrorReason, UnsupportedOperationError, ValueError } from '@tetherto/wdk-wallet'
 
-import { WalletAccountEvm } from '@tetherto/wdk-wallet-evm'
+import { PrivateKeySignerEvm, SeedSignerEvm } from '@tetherto/wdk-wallet-evm/signers'
 
 import { ENTRYPOINT_V7, calculateUserOperationMaxGasCost, fetchAccountNonce } from 'abstractionkit'
 
@@ -40,6 +40,8 @@ import WalletAccountReadOnlyEvmErc4337, { FEE_TOLERANCE_COEFFICIENT } from './wa
 /** @typedef {import('@tetherto/wdk-wallet').IWalletAccount} IWalletAccount */
 
 /** @typedef {import('@tetherto/wdk-wallet-evm').KeyPair} KeyPair */
+/** @typedef {import('@tetherto/wdk-wallet-evm/signers').ISignerEvm} ISignerEvm */
+/** @typedef {import('@tetherto/wdk-wallet-evm').SignerOptions} SignerOptions */
 
 /** @typedef {import('@tetherto/wdk-wallet-evm').TransactionResult} TransactionResult */
 /** @typedef {import('@tetherto/wdk-wallet-evm').TransferResult} TransferResult */
@@ -68,22 +70,64 @@ const MAX_UINT192 = (1n << 192n) - 1n
 
 const USDT_MAINNET_ADDRESS = '0xdAC17F958D2ee523a2206206994597C13D831ec7'
 
+const BIP_44_ETH_DERIVATION_PATH_PREFIX = "m/44'/60'"
+
+const DEFAULT_ACCOUNT_PATH = "0'/0/0"
+
 /** @implements {IWalletAccount<UserOperationV7>} */
 export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc4337 {
   /**
-   * Creates a new evm [erc-4337](https://www.erc4337.io/docs) wallet account.
+   * Creates a new evm [erc-4337](https://www.erc4337.io/docs) wallet account from a BIP-39 seed.
    *
+   * @overload
    * @param {string | Uint8Array} seed - A [BIP-39](https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki) mnemonic seed phrase, or a raw BIP-32 master seed (16-64 bytes).
-   * @param {string} path - The BIP-44 derivation path (e.g. "0'/0/0").
+   * @param {string} path - The BIP-44 derivation path, relative to "m/44'/60'" (e.g. "0'/0/0").
    * @param {EvmErc4337WalletConfig} config - The configuration object.
+   * @throws {ValueError} If the given seed phrase is invalid.
    */
-  constructor (seed, path, config) {
-    // Owner EOA only needs keys/address for 4337; strip `provider` so
-    // wdk-wallet-evm does not open a second JsonRpcProvider.
-    const { provider: _provider, ...ownerConfig } = config
-    const ownerAccount = new WalletAccountEvm(seed, path, ownerConfig)
 
-    super(ownerAccount._address, config)
+  /**
+   * Creates a new evm [erc-4337](https://www.erc4337.io/docs) wallet account from a BIP-39 seed at path m/44'/60'/0'/0/0.
+   *
+   * @overload
+   * @param {string | Uint8Array} seed - A [BIP-39](https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki) mnemonic seed phrase, or a raw BIP-32 master seed (16-64 bytes).
+   * @param {EvmErc4337WalletConfig} config - The configuration object.
+   * @throws {ValueError} If the given seed phrase is invalid.
+   */
+
+  /**
+   * Creates a new evm [erc-4337](https://www.erc4337.io/docs) wallet account using a signer as the safe's owner.
+   *
+   * The signer is wiped on {@link dispose} only if `shouldWipeSignerOnDisposal` is set. It must expose its address
+   * synchronously, since the safe's address is computed from it at construction.
+   *
+   * @overload
+   * @param {ISignerEvm} signer - A signer implementing the EVM signer interface.
+   * @param {EvmErc4337WalletConfig & SignerOptions} config - The configuration object.
+   * @throws {InvalidSignerError} If the signer does not expose its address synchronously.
+   */
+
+  constructor (seedOrSigner, pathOrConfig, config) {
+    const isSeed = typeof seedOrSigner === 'string' || seedOrSigner instanceof Uint8Array
+    const hasPath = typeof pathOrConfig === 'string'
+    const [signer, configuration] = isSeed
+      ? [
+          new SeedSignerEvm(seedOrSigner, `${BIP_44_ETH_DERIVATION_PATH_PREFIX}/${hasPath ? pathOrConfig : DEFAULT_ACCOUNT_PATH}`),
+          hasPath ? config : pathOrConfig
+        ]
+      : [seedOrSigner, pathOrConfig]
+
+    try {
+      if (!signer.address) {
+        throw new InvalidSignerError('The signer must expose its address synchronously to be used as a safe owner.')
+      }
+
+      super(signer.address, configuration)
+    } catch (error) {
+      if (isSeed) signer.dispose()
+
+      throw error
+    }
 
     /**
      * The evm erc-4337 wallet account configuration.
@@ -91,10 +135,18 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
      * @protected
      * @type {EvmErc4337WalletConfig}
      */
-    this._config = config
+    this._config = configuration
+
+    /**
+     * If true, disposes the signer on calls to the 'dispose' method.
+     *
+     * @protected
+     * @type {boolean}
+     */
+    this._shouldWipeSignerOnDisposal = isSeed || Boolean(configuration.shouldWipeSignerOnDisposal)
 
     /** @private */
-    this._ownerAccount = ownerAccount
+    this._signer = signer
 
     /**
      * Cached quotes from fee estimations, keyed by serialized transaction.
@@ -119,21 +171,28 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
   }
 
   /**
-   * The derivation path's index of this account.
+   * Creates a new evm [erc-4337](https://www.erc4337.io/docs) wallet account whose safe owner is a raw private key.
    *
-   * @type {number}
+   * The account owns the key and wipes it on {@link dispose}.
+   *
+   * @param {string | Uint8Array} privateKey - The raw private key (hex string with or without 0x, or 32 bytes).
+   * @param {EvmErc4337WalletConfig} config - The configuration object.
+   * @returns {WalletAccountEvmErc4337} The wallet account.
    */
-  get index () {
-    return this._ownerAccount.index
+  static fromPrivateKey (privateKey, config) {
+    const signer = new PrivateKeySignerEvm(privateKey)
+
+    return new WalletAccountEvmErc4337(signer, { ...config, shouldWipeSignerOnDisposal: true })
   }
 
   /**
-   * The derivation path of this account (see [BIP-44](https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki)).
+   * The derivation path of this account (see [BIP-44](https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki)),
+   * or null if the account's signer is not bound to a BIP-44 position (e.g. private-key signers).
    *
-   * @type {string}
+   * @type {string | null}
    */
   get path () {
-    return this._ownerAccount.path
+    return this._signer.path
   }
 
   /**
@@ -143,10 +202,10 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
    * it's strongly recommended to treat the key pair as a read-only view of the keys. While it's still technically possible to alter their
    * content, client code should never do so.
    *
-   * @type {KeyPair}
+   * @type {KeyPair | null}
    */
   get keyPair () {
-    return this._ownerAccount.keyPair
+    return this._signer.keyPair
   }
 
   /**
@@ -156,7 +215,7 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
    * @returns {Promise<string>} The message's signature.
    */
   async sign (message) {
-    return await this._ownerAccount.sign(message)
+    return await this._signer.sign(message)
   }
 
   /**
@@ -166,7 +225,7 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
    * @returns {Promise<string>} The typed data signature.
    */
   async signTypedData ({ domain, types, message }) {
-    return await this._ownerAccount.signTypedData({ domain, types, message })
+    return await this._signer.signTypedData({ domain, types, message })
   }
 
   /**
@@ -389,7 +448,7 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
    * @returns {Promise<WalletAccountReadOnlyEvmErc4337>} The read-only account.
    */
   async toReadOnlyAccount () {
-    const address = await this._ownerAccount.getAddress()
+    const address = await this._signer.getAddress()
 
     const readOnlyAccount = new WalletAccountReadOnlyEvmErc4337(address, this._config)
 
@@ -400,7 +459,9 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
    * Disposes the wallet account, erasing the private key from the memory.
    */
   dispose () {
-    this._ownerAccount.dispose()
+    if (this._shouldWipeSignerOnDisposal) {
+      this._signer.dispose()
+    }
   }
 
   /** @private */
@@ -505,7 +566,7 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
 
     const signer = {
       address: this._ownerAccountAddress,
-      signHash: async (hash) => this._ownerAccount._signer._account.signingKey.sign(hash).serialized
+      signTypedData: async (typedData) => await this._signer.signTypedData(typedData)
     }
     userOp.signature = await smartAccount.signUserOperationWithSigners(
       userOp,
